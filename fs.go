@@ -17,8 +17,6 @@ const (
 	FAT32 = iota
 )
 
-type SectorSize uint16
-
 type Flags struct {
 	Dirty       bool
 	Open        bool
@@ -35,6 +33,31 @@ type Info struct {
 	ReservedSectors   uint16
 	SectorSize        uint16
 	rootDirectorySize uint32
+}
+
+type FAT16SpecificData struct {
+	BSDriveNumber    byte
+	BSReserved1      byte
+	BSBootSig        byte
+	BSVolumeId       uint32
+	BSVolumeLabel    [11]byte
+	BSFileSystemType [8]byte
+}
+
+type FAT32SpecificData struct {
+	FatSize          uint32
+	ExtFlags         uint16
+	FSVersion        uint16
+	RootCluster      uint32
+	FSInfo           uint16
+	BkBootSector     uint16
+	Reserved         [12]byte
+	BSDriveNumber    byte
+	BSReserved1      byte
+	BSBootSig        byte
+	BSVolumeID       uint32
+	BSVolumeLabel    [11]byte
+	BSFileSystemType [8]byte
 }
 
 type BPB struct {
@@ -127,17 +150,60 @@ func (fs *Fs) initialize() error {
 
 	// TODO: add check for NumFATs >= 1 and support also 1?
 
-	if bpb.Media != 0xF0 ||
-		bpb.Media != 0xF8 ||
-		bpb.Media != 0xF9 ||
-		bpb.Media != 0xFA ||
-		bpb.Media != 0xFB ||
-		bpb.Media != 0xFC ||
-		bpb.Media != 0xFD ||
-		bpb.Media != 0xFE ||
+	if bpb.Media != 0xF0 &&
+		bpb.Media != 0xF8 &&
+		bpb.Media != 0xF9 &&
+		bpb.Media != 0xFA &&
+		bpb.Media != 0xFB &&
+		bpb.Media != 0xFC &&
+		bpb.Media != 0xFD &&
+		bpb.Media != 0xFE &&
 		bpb.Media != 0xFF {
 		return fmt.Errorf("invalid media value")
 	}
+
+	if fs.sector.buffer[510] != 0x55 || fs.sector.buffer[511] != 0xAA {
+		return fmt.Errorf("invalid signature at offset 510 / 511")
+	}
+
+	var fatSize, totalSectors, dataSectors, countOfClusters uint32
+
+	// Calculate the cluster count to determine the FAT type
+	var rootDirSectors uint32 = ((uint32(bpb.RootEntryCount) * 32) + (uint32(bpb.BytesPerSector) - 1)) / uint32(bpb.BytesPerSector)
+
+	fat32Specific := FAT32SpecificData{}
+	err = binary.Read(bytes.NewReader(bpb.FATSpecificData[:]), binary.LittleEndian, &fat32Specific)
+	if err != nil {
+		return err
+	}
+
+	if bpb.FATSize16 != 0 {
+		fatSize = uint32(bpb.FATSize16)
+	} else {
+		fatSize = fat32Specific.FatSize
+	}
+
+	if bpb.TotalSectors16 != 0 {
+		totalSectors = uint32(bpb.TotalSectors16)
+	} else {
+		totalSectors = bpb.TotalSectors32
+	}
+
+	dataSectors = totalSectors - (uint32(bpb.ReservedSectorCount) + uint32(bpb.NumFATs)) + rootDirSectors
+	countOfClusters = dataSectors / uint32(bpb.SectorsPerCluster)
+
+	if countOfClusters < 4085 {
+		// 12
+		fmt.Println("found FAT12")
+	} else if countOfClusters < 65525 {
+		// 16
+		fmt.Println("found FAT16")
+	} else {
+		// 32
+		fmt.Println("found FAT32")
+	}
+
+	fmt.Println(fatSize)
 
 	//TODO if type = FAT32 && bpb.RootEntryCount != 0 || (type != FAT32 && (bpb.RootEntryCount * 32) % bpb.BytesPerSec != 0)
 
