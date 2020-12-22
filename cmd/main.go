@@ -22,7 +22,5 @@ func main() {
 
 	defer file.Close()
 
-	fs := gofat.New(file)
-
-	fmt.Println(fs)
+	gofat.New(file)
 }

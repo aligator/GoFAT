@@ -3,6 +3,7 @@ package gofat
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -26,56 +27,16 @@ type Flags struct {
 
 // Info contains all information about the whole filesystem.
 type Info struct {
-	FSType            uint8
-	SectorsPerCluster uint8
-	FirstDataSector   uint32
-	TotalSectors      uint32
-	ReservedSectors   uint16
-	SectorSize        uint16
-	rootDirectorySize uint32
-}
-
-type FAT16SpecificData struct {
-	BSDriveNumber    byte
-	BSReserved1      byte
-	BSBootSig        byte
-	BSVolumeId       uint32
-	BSVolumeLabel    [11]byte
-	BSFileSystemType [8]byte
-}
-
-type FAT32SpecificData struct {
-	FatSize          uint32
-	ExtFlags         uint16
-	FSVersion        uint16
-	RootCluster      uint32
-	FSInfo           uint16
-	BkBootSector     uint16
-	Reserved         [12]byte
-	BSDriveNumber    byte
-	BSReserved1      byte
-	BSBootSig        byte
-	BSVolumeID       uint32
-	BSVolumeLabel    [11]byte
-	BSFileSystemType [8]byte
-}
-
-type BPB struct {
-	BSJumpBoot          [3]byte
-	BSOEMName           [8]byte
-	BytesPerSector      uint16
-	SectorsPerCluster   byte
+	FSType              uint8
+	SectorsPerCluster   uint8
+	FirstDataSector     uint32
+	TotalSectorCount    uint32
 	ReservedSectorCount uint16
-	NumFATs             byte
-	RootEntryCount      uint16
-	TotalSectors16      uint16
-	Media               byte
-	FATSize16           uint16
-	SectorsPerTrack     uint16
-	NumberOfHeads       uint16
-	HiddenSectors       uint32
-	TotalSectors32      uint32
-	FATSpecificData     [54]byte
+	BytesPerSector      uint16
+	Label               string
+	RootDirectory       Directory
+	fat32Specific       FAT32SpecificData
+	fat16Specific       FAT16SpecificData
 }
 
 type Sector struct {
@@ -96,8 +57,24 @@ func New(reader io.ReadSeeker) afero.Fs {
 	}
 
 	fs.initialize()
-
+	fs.readRoot()
 	return fs
+}
+
+func (fs *Fs) readRoot() {
+	if fs.info.FSType == FAT12 {
+		panic("not supported")
+	}
+
+	switch fs.info.FSType {
+	case FAT16:
+		panic("implement me")
+	case FAT32:
+		firstSectorOfCluster := ((fs.info.fat32Specific.RootCluster - 2) * uint32(fs.info.SectorsPerCluster)) + fs.info.FirstDataSector
+		fs.fetch(firstSectorOfCluster)
+
+		fmt.Printf("%x\n", fs.sector.buffer)
+	}
 }
 
 func (fs *Fs) initialize() error {
@@ -105,7 +82,7 @@ func (fs *Fs) initialize() error {
 	// The data for the first sector is always in the first 512 so use that until the correct sector size is loaded.
 	// Note that almost all FAT filesystems use 512.
 	// Some may use 1024, 2048 or 4096 but this is not supported by many drivers.
-	fs.info.SectorSize = 512
+	fs.info.BytesPerSector = 512
 	fs.sector.buffer = make([]uint8, 512)
 
 	// Read sec0
@@ -120,59 +97,47 @@ func (fs *Fs) initialize() error {
 		return err
 	}
 
-	fmt.Println(bpb)
-
 	// Check if it is really a FAT filesystem.
 	// Check for valid jump instructions
 	if !(bpb.BSJumpBoot[0] == 0xEB && bpb.BSJumpBoot[2] == 0x90) && !(bpb.BSJumpBoot[0] == 0xE9) {
-		return fmt.Errorf("no valid jump instructions at the beginning")
+		return errors.New("no valid jump instructions at the beginning")
 	}
 
 	// Load the sector size and use it for all following sector reads.
 	// Also FAT only supports 512, 1024, 2048 and 4096
 	if bpb.BytesPerSector != 512 && bpb.BytesPerSector != 1024 && bpb.BytesPerSector != 2048 && bpb.BytesPerSector != 4096 {
-		return fmt.Errorf("invalid sector size")
+		return errors.New("invalid sector size")
 	}
-	fs.info.SectorSize = bpb.BytesPerSector
 
 	// Sectors per cluster has to be a power of two and greater than 0.
 	// Also the whole cluster size should not be more than 32K.
 	if bpb.SectorsPerCluster%2 != 0 || bpb.SectorsPerCluster == 0 || (bpb.BytesPerSector*uint16(bpb.SectorsPerCluster)) > (32*1024) {
-		return fmt.Errorf("invalid sectors per cluster")
+		return errors.New("invalid sectors per cluster")
 	}
 
 	// The reserved sector count should not be 0.
 	// Note: for FAT12 and FAT16 it is typically 1 for FAT32 it is typically 32.
 	if bpb.ReservedSectorCount == 0 {
-		return fmt.Errorf("invalid reserved sector count")
+		return errors.New("invalid reserved sector count")
 	}
-	fs.info.ReservedSectors = bpb.ReservedSectorCount
 
 	// TODO: add check for NumFATs >= 1 and support also 1?
 
 	if bpb.Media != 0xF0 &&
-		bpb.Media != 0xF8 &&
-		bpb.Media != 0xF9 &&
-		bpb.Media != 0xFA &&
-		bpb.Media != 0xFB &&
-		bpb.Media != 0xFC &&
-		bpb.Media != 0xFD &&
-		bpb.Media != 0xFE &&
-		bpb.Media != 0xFF {
-		return fmt.Errorf("invalid media value")
+		!(bpb.Media >= 0xF8 && bpb.Media <= 0xFF) {
+		return errors.New("invalid media value")
 	}
 
 	if fs.sector.buffer[510] != 0x55 || fs.sector.buffer[511] != 0xAA {
-		return fmt.Errorf("invalid signature at offset 510 / 511")
+		return errors.New("invalid signature at offset 510 / 511")
 	}
 
 	var fatSize, totalSectors, dataSectors, countOfClusters uint32
 
-	// Calculate the cluster count to determine the FAT type
+	// Calculate the cluster count to determine the FAT type.
 	var rootDirSectors uint32 = ((uint32(bpb.RootEntryCount) * 32) + (uint32(bpb.BytesPerSector) - 1)) / uint32(bpb.BytesPerSector)
 
-	fat32Specific := FAT32SpecificData{}
-	err = binary.Read(bytes.NewReader(bpb.FATSpecificData[:]), binary.LittleEndian, &fat32Specific)
+	err = binary.Read(bytes.NewReader(bpb.FATSpecificData[:]), binary.LittleEndian, &fs.info.fat32Specific)
 	if err != nil {
 		return err
 	}
@@ -180,7 +145,7 @@ func (fs *Fs) initialize() error {
 	if bpb.FATSize16 != 0 {
 		fatSize = uint32(bpb.FATSize16)
 	} else {
-		fatSize = fat32Specific.FatSize
+		fatSize = fs.info.fat32Specific.FatSize
 	}
 
 	if bpb.TotalSectors16 != 0 {
@@ -192,36 +157,48 @@ func (fs *Fs) initialize() error {
 	dataSectors = totalSectors - (uint32(bpb.ReservedSectorCount) + uint32(bpb.NumFATs)) + rootDirSectors
 	countOfClusters = dataSectors / uint32(bpb.SectorsPerCluster)
 
+	// Now the correct type can be determined based on the cluster count.
 	if countOfClusters < 4085 {
-		// 12
 		fmt.Println("found FAT12")
+		// For now do not support FAT12 as its a bit more complicated.
+		return errors.New("FAT12 is not supported")
 	} else if countOfClusters < 65525 {
-		// 16
 		fmt.Println("found FAT16")
+		fs.info.FSType = FAT16
 	} else {
-		// 32
 		fmt.Println("found FAT32")
+		fs.info.FSType = FAT32
 	}
 
-	fmt.Println(fatSize)
+	// The root entry count has to be 0 for FAT32 and has to fit exactly into the sectors.
+	if fs.info.FSType == FAT32 && bpb.RootEntryCount != 0 || (fs.info.FSType != FAT32 && (bpb.RootEntryCount*32)%bpb.BytesPerSector != 0) {
+		return errors.New("invalid root entry count")
+	}
 
-	//TODO if type = FAT32 && bpb.RootEntryCount != 0 || (type != FAT32 && (bpb.RootEntryCount * 32) % bpb.BytesPerSec != 0)
+	err = binary.Read(bytes.NewReader(bpb.FATSpecificData[:]), binary.LittleEndian, &fs.info.fat16Specific)
+	if err != nil {
+		return err
+	}
 
-	//TODO if type = FAT32 && bpb.TotalSectors16 != 0
-	//TODO if type = FAT32 && bpb.TotalSectors32 == 0
-	//TODO if type != FAT32 && (bpb.TotalSectors16 == 0 && bpb.TotalSectors32 != 0) && (bpb.TotalSectors32 == 0 && bpb.TotalSectors16 != 0)
+	// Now all needed data can be saved. See FAT spec for details.
+	fs.info.BytesPerSector = bpb.BytesPerSector
 	if bpb.TotalSectors16 != 0 {
-		fs.info.TotalSectors = uint32(bpb.TotalSectors16)
-	} else if bpb.TotalSectors32 != 0 {
-		fs.info.TotalSectors = bpb.TotalSectors32
+		fs.info.TotalSectorCount = uint32(bpb.TotalSectors16)
+	} else {
+		fs.info.TotalSectorCount = bpb.TotalSectors32
+	}
+	dataSectors = fs.info.TotalSectorCount - (uint32(bpb.ReservedSectorCount) + (uint32(bpb.NumFATs) * fatSize) + rootDirSectors)
+	fs.info.SectorsPerCluster = bpb.SectorsPerCluster
+	fs.info.ReservedSectorCount = bpb.ReservedSectorCount
+	fs.info.FirstDataSector = uint32(bpb.ReservedSectorCount) + (uint32(bpb.NumFATs) * fatSize) + rootDirSectors
+
+	if fs.info.FSType == FAT32 {
+		fs.info.Label = string(fs.info.fat32Specific.BSVolumeLabel[:])
+	} else {
+		fs.info.Label = string(fs.info.fat16Specific.BSVolumeLabel[:])
 	}
 
-	//TODO if type = FAT32 && bpb.FATSize16 != 0 && bpb.FATSize32 == 0 || (type != FAT32 && bpb.FATSiz16 == 0 && bpb.FATSiz32 != 0)
-	//if bpb.FATSize16 != 0 {
-	//	fs.info.FATSize = bpb.FATSize16
-	//} else if bpb.FATSize32 != 0 {
-	//	fs.info.FATSize = bpb.FATSize32
-	//}
+	fmt.Printf("found volume \"%v\"\n", fs.info.Label)
 
 	return nil
 }
@@ -242,7 +219,7 @@ func (fs *Fs) fetch(sector uint32) error {
 	}
 
 	// Seek to and Read the new sector.
-	_, err := fs.reader.Seek(int64(sector)*int64(fs.info.SectorSize), io.SeekStart)
+	_, err := fs.reader.Seek(int64(sector)*int64(fs.info.BytesPerSector), io.SeekStart)
 	if err != nil {
 		return err
 	}
@@ -255,6 +232,33 @@ func (fs *Fs) fetch(sector uint32) error {
 	fs.sector.current = sector
 
 	return nil
+}
+
+func (fs *Fs) fetchFatEntry(cluster uint32) {
+	if fs.info.FSType == FAT12 {
+		panic("not supported")
+	}
+
+	var fatOffset uint32
+	switch fs.info.FSType {
+	case FAT16:
+		fatOffset = cluster * 2
+	case FAT32:
+		fatOffset = cluster * 4
+	}
+
+	fatSectorNumber := uint32(fs.info.ReservedSectorCount) + (fatOffset / uint32(fs.info.BytesPerSector))
+	fatEntryOffset := fatOffset % uint32(fs.info.BytesPerSector)
+	fs.fetch(fatSectorNumber)
+
+	switch fs.info.FSType {
+	case FAT16:
+		fat16ClusterEntryValue := binary.LittleEndian.Uint16(fs.sector.buffer[fatEntryOffset : fatEntryOffset+2])
+		fmt.Printf("%x\n", fat16ClusterEntryValue)
+	case FAT32:
+		fat32ClusterEntryValue := binary.LittleEndian.Uint32(fs.sector.buffer[fatEntryOffset:fatEntryOffset+4]) & 0x0FFFFFFF
+		fmt.Printf("%x\n", fat32ClusterEntryValue)
+	}
 }
 
 func (fs *Fs) store() error {
@@ -298,7 +302,7 @@ func (fs *Fs) Stat(name string) (os.FileInfo, error) {
 }
 
 func (fs *Fs) Name() string {
-	panic("implement me")
+	return "FAT"
 }
 
 func (fs *Fs) Chmod(name string, mode os.FileMode) error {
