@@ -33,7 +33,7 @@ type FAT32SpecificData struct {
 	FatSize          uint32
 	ExtFlags         uint16
 	FSVersion        uint16
-	RootCluster      uint32
+	RootCluster      FatEntry
 	FSInfo           uint16
 	BkBootSector     uint16
 	Reserved         [12]byte
@@ -57,5 +57,6 @@ type Directory struct {
 	WrtTime      uint16
 	WrtDate      uint16
 	FstClusLO    uint16
-	FileSize     uint32
+
+	FileSize uint32
 }
