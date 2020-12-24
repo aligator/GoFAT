@@ -60,9 +60,10 @@ func New(reader io.ReadSeeker) afero.Fs {
 	return fs
 }
 
-func (fs *Fs) readDir(cluster FatEntry) ([]Directory, error) {
-	directories := make([]Directory, 0)
+func (fs *Fs) readFile(cluster FatEntry) ([]byte, error) {
+	data := make([]byte, 0)
 
+	clusterNumber := 0
 	currentCluster := cluster
 	for {
 		nextCluster := fs.getFatEntry(currentCluster)
@@ -71,25 +72,53 @@ func (fs *Fs) readDir(cluster FatEntry) ([]Directory, error) {
 
 		for i := uint8(0); i < fs.info.SectorsPerCluster; i++ {
 			fs.fetch(firstSectorOfCluster + uint32(i))
-			newDirectories := make([]Directory, fs.info.BytesPerSector/32)
-			err := binary.Read(bytes.NewReader(fs.sector.buffer), binary.LittleEndian, &newDirectories)
+			newData := make([]byte, fs.info.BytesPerSector)
+			err := binary.Read(bytes.NewReader(fs.sector.buffer), binary.LittleEndian, &newData)
 			if err != nil {
 				return nil, err
 			}
 
-			for _, d := range newDirectories {
-				if d != (Directory{}) {
-					directories = append(directories, d)
-				}
-			}
+			data = append(data, newData...)
 		}
 
-		if nextCluster.ReadAsNextCluster() {
-			currentCluster = nextCluster
-		} else {
+		if !nextCluster.ReadAsNextCluster() {
 			break
 		}
 
+		currentCluster = nextCluster
+		clusterNumber++
+	}
+
+	return data, nil
+}
+
+func (fs *Fs) readDir(cluster FatEntry) ([]Directory, error) {
+	data, err := fs.readFile(cluster)
+	if err != nil {
+		return nil, err
+	}
+
+	directories := make([]Directory, len(data)/32)
+
+	err = binary.Read(bytes.NewReader(data), binary.LittleEndian, &directories)
+	if err != nil {
+		return nil, err
+	}
+
+	// Find the last non-empty directory.
+	for i := 0; i <= len(directories); i++ {
+		// If no more dir exists, return an empty slice.
+		if len(directories)-1-i < 0 {
+			directories = directories[:0]
+			break
+		}
+
+		// Else check if the previous directory is not empty.
+		// If yes, strip all after it out of the slice.
+		if directories[len(directories)-1-i] != (Directory{}) {
+			directories = directories[:len(directories)-i]
+			break
+		}
 	}
 
 	return directories, nil
