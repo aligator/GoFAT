@@ -14,13 +14,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	file, err := os.Open(argsWithoutProg[0])
+	fsFile, err := os.Open(argsWithoutProg[0])
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
 
-	defer file.Close()
+	defer fsFile.Close()
 
-	gofat.New(file)
+	fat := gofat.New(fsFile)
+	file, err := fat.Open("/")
+	if err != nil {
+		fmt.Println("Could not open the root file.")
+		os.Exit(1)
+	}
+
+	content, err := file.Readdirnames(0)
+	if err != nil {
+		fmt.Println("Could get folder content.")
+		os.Exit(1)
+	}
+
+	fmt.Println(content)
 }

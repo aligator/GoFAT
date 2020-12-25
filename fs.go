@@ -18,6 +18,16 @@ const (
 	FAT32 = iota
 )
 
+const (
+	AttrReadOnly  = 0x01
+	AttrHidden    = 0x02
+	AttrSystem    = 0x04
+	AttrVolumeId  = 0x08
+	AttrDirectory = 0x10
+	AttrArchive   = 0x12
+	AttrLongName  = AttrReadOnly | AttrHidden | AttrSystem | AttrVolumeId
+)
+
 type Flags struct {
 	Dirty       bool
 	Open        bool
@@ -56,11 +66,10 @@ func New(reader io.ReadSeeker) afero.Fs {
 	}
 
 	fs.initialize()
-	_ = fs.readRoot()
 	return fs
 }
 
-func (fs *Fs) readFile(cluster FatEntry) ([]byte, error) {
+func (fs *Fs) readFile(cluster fatEntry) ([]byte, error) {
 	data := make([]byte, 0)
 
 	clusterNumber := 0
@@ -92,39 +101,38 @@ func (fs *Fs) readFile(cluster FatEntry) ([]byte, error) {
 	return data, nil
 }
 
-func (fs *Fs) readDir(cluster FatEntry) ([]Directory, error) {
+func (fs *Fs) readDir(cluster fatEntry) ([]os.FileInfo, error) {
 	data, err := fs.readFile(cluster)
 	if err != nil {
 		return nil, err
 	}
 
-	directories := make([]Directory, len(data)/32)
+	entries := make([]EntryHeader, len(data)/32)
 
-	err = binary.Read(bytes.NewReader(data), binary.LittleEndian, &directories)
+	err = binary.Read(bytes.NewReader(data), binary.LittleEndian, &entries)
 	if err != nil {
 		return nil, err
 	}
 
-	// Find the last non-empty directory.
-	for i := 0; i <= len(directories); i++ {
-		// If no more dir exists, return an empty slice.
-		if len(directories)-1-i < 0 {
-			directories = directories[:0]
+	// Convert to fatFiles and filter empty entries.
+	directory := make([]os.FileInfo, 0)
+	for _, entry := range entries {
+		if entry == (EntryHeader{}) {
 			break
 		}
 
-		// Else check if the previous directory is not empty.
-		// If yes, strip all after it out of the slice.
-		if directories[len(directories)-1-i] != (Directory{}) {
-			directories = directories[:len(directories)-i]
-			break
+		// Filter out not displayed entries
+		if entry.Attr&AttrVolumeId == AttrVolumeId {
+			continue
 		}
+
+		directory = append(directory, entry.FileInfo())
 	}
 
-	return directories, nil
+	return directory, nil
 }
 
-func (fs *Fs) readRoot() error {
+func (fs *Fs) readRoot() ([]os.FileInfo, error) {
 	if fs.info.FSType == FAT12 {
 		panic("not supported")
 	}
@@ -135,15 +143,13 @@ func (fs *Fs) readRoot() error {
 	case FAT32:
 		root, err := fs.readDir(fs.info.fat32Specific.RootCluster)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
-		for _, d := range root {
-			fmt.Println(string(d.Name[:]), d.Attr)
-		}
+		return root, nil
 	}
 
-	return nil
+	panic("not supported")
 }
 
 func (fs *Fs) initialize() error {
@@ -303,26 +309,26 @@ func (fs *Fs) fetch(sector uint32) error {
 	return nil
 }
 
-type FatEntry uint32
+type fatEntry uint32
 
-func (e FatEntry) Value() uint32 {
+func (e fatEntry) Value() uint32 {
 	return uint32(e)
 }
 
 // IsFree only returns true if the sector is unused.
-func (e FatEntry) IsFree() bool {
+func (e fatEntry) IsFree() bool {
 	return (e & 0x0FFFFFFF) == 0x00000000
 }
 
 // IsReservedTemp is a special value used to mark clusters as tmp-eof e.g. while writing data to it.
 // It should be treated like EOF. Use ReadAsEOF to check for all EOF-like values.
-func (e FatEntry) IsReservedTemp() bool {
+func (e fatEntry) IsReservedTemp() bool {
 	return (e & 0x0FFFFFFF) == 0x00000001
 }
 
 // IsNextCluster is true if the cluster is a normal data cluster.
 // Use ReadAsNextCluster to check for all DataCluster-like values.
-func (e FatEntry) IsNextCluster() bool {
+func (e fatEntry) IsNextCluster() bool {
 	masked := e & 0x0FFFFFFF
 	return masked >= 0x00000002 && masked <= 0x0FFFFFEF
 }
@@ -330,26 +336,26 @@ func (e FatEntry) IsNextCluster() bool {
 // IsReservedSometimes is a special value which may occur in rare cases. Should be treated as a DataCluster.
 // TODO: For FAT12 a special case exists -> 0xFF0 should be read as EOF. This is not implemented yet.
 // Use ReadAsNextCluster to check for all DataCluster-like values.
-func (e FatEntry) IsReservedSometimes() bool {
+func (e fatEntry) IsReservedSometimes() bool {
 	masked := e & 0x0FFFFFFF
 	return masked >= 0x0FFFFFF0 && masked <= 0x0FFFFFF5
 }
 
 // IsReserved is a special value which may occur in rare cases. Should be treated as a DataCluster.
 // Use ReadAsNextCluster to check for all DataCluster-like values.
-func (e FatEntry) IsReserved() bool {
+func (e fatEntry) IsReserved() bool {
 	return (e & 0x0FFFFFFF) == 0x0FFFFFF6
 }
 
 // IsBad is a special value which indicates a bad sector. Should be treated as a DataCluster.
 // Use ReadAsNextCluster to check for all DataCluster-like values.
-func (e FatEntry) IsBad() bool {
+func (e fatEntry) IsBad() bool {
 	return (e & 0x0FFFFFFF) == 0x0FFFFFF7
 }
 
 // IsEOF is a special value used to mark clusters as EOF.
 // Use ReadAsEOF to check for all EOF-like values.
-func (e FatEntry) IsEOF() bool {
+func (e fatEntry) IsEOF() bool {
 	masked := e & 0x0FFFFFFF
 	return masked >= 0x0FFFFFF8 && masked <= 0x0FFFFFFF
 }
@@ -357,7 +363,7 @@ func (e FatEntry) IsEOF() bool {
 // ReadAsNextCluster treats all values specified as "should be used as Data Cluster" in
 // https://en.wikipedia.org/wiki/Design_of_the_FAT_file_system#Cluster_values
 // Use this tho check if it should be read as a normal data cluster.
-func (e FatEntry) ReadAsNextCluster() bool {
+func (e fatEntry) ReadAsNextCluster() bool {
 	// TODO: e.IsReservedSometimes(): MS-DOS/PC DOS 3.3 and higher treats a value of 0xFF0[nb 11][13] on FAT12 (but not on FAT16 or FAT32)
 	//       volumes as additional end-of-chain marker similar to 0xFF8-0xFFF.[13] For compatibility with MS-DOS/PC DOS,
 	//       file systems should avoid to use data cluster 0xFF0 in cluster chains on FAT12 volumes (that is, treat it
@@ -370,12 +376,12 @@ func (e FatEntry) ReadAsNextCluster() bool {
 // ReadAsEOF treats all values specified as "should be read as EOF" in
 // https://en.wikipedia.org/wiki/Design_of_the_FAT_file_system#Cluster_values
 // Use this tho check if it should be read as an EOF.
-func (e FatEntry) ReadAsEOF() bool {
+func (e fatEntry) ReadAsEOF() bool {
 	return e.IsEOF() || e.IsReservedTemp()
 }
 
 // getFatEntry returns the next fat entry for the given cluster.
-func (fs *Fs) getFatEntry(cluster FatEntry) FatEntry {
+func (fs *Fs) getFatEntry(cluster fatEntry) fatEntry {
 	if fs.info.FSType == FAT12 {
 		panic("not supported")
 	}
@@ -399,13 +405,13 @@ func (fs *Fs) getFatEntry(cluster FatEntry) FatEntry {
 
 		// convert the special values to FAT32 special values
 		if fat16ClusterEntryValue >= 0xFFF0 && fat16ClusterEntryValue <= 0xFFFF {
-			return FatEntry(uint32(fat16ClusterEntryValue) | 0x0FFFF000&0x0FFFFFFF)
+			return fatEntry(uint32(fat16ClusterEntryValue) | 0x0FFFF000&0x0FFFFFFF)
 		}
 
-		return FatEntry(fat16ClusterEntryValue)
+		return fatEntry(fat16ClusterEntryValue)
 	case FAT32:
 		fat32ClusterEntryValue := binary.LittleEndian.Uint32(fs.sector.buffer[fatEntryOffset:fatEntryOffset+4]) & 0x0FFFFFFF
-		return FatEntry(fat32ClusterEntryValue)
+		return fatEntry(fat32ClusterEntryValue)
 	}
 
 	panic("not supported")
@@ -428,7 +434,17 @@ func (fs *Fs) MkdirAll(path string, perm os.FileMode) error {
 }
 
 func (fs *Fs) Open(name string) (afero.File, error) {
-	panic("implement me")
+	// TODO: check name
+	return File{
+		fs:           fs,
+		path:         name,
+		isDirectory:  true,
+		isReadOnly:   false,
+		isHidden:     false,
+		isSystem:     false,
+		firstCluster: 0,
+		size:         0,
+	}, nil
 }
 
 func (fs *Fs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {

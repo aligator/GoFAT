@@ -23,7 +23,7 @@ type BPB struct {
 type FAT16SpecificData struct {
 	BSDriveNumber    byte
 	BSReserved1      byte
-	BSBootSig        byte
+	BSBootSignature  byte
 	BSVolumeId       uint32
 	BSVolumeLabel    [11]byte
 	BSFileSystemType [8]byte
@@ -33,30 +33,29 @@ type FAT32SpecificData struct {
 	FatSize          uint32
 	ExtFlags         uint16
 	FSVersion        uint16
-	RootCluster      FatEntry
+	RootCluster      fatEntry
 	FSInfo           uint16
 	BkBootSector     uint16
 	Reserved         [12]byte
 	BSDriveNumber    byte
 	BSReserved1      byte
-	BSBootSig        byte
+	BSBootSignature  byte
 	BSVolumeID       uint32
 	BSVolumeLabel    [11]byte
 	BSFileSystemType [8]byte
 }
 
-type Directory struct {
-	Name         [11]byte
-	Attr         byte
-	NTRes        byte
-	CrtTimeTenth byte
-	CrtTime      uint16
-	CrtDate      uint16
-	LstAccDate   uint16
-	FstClusHI    uint16
-	WrtTime      uint16
-	WrtDate      uint16
-	FstClusLO    uint16
-
-	FileSize uint32
+type EntryHeader struct {
+	Name            [11]byte
+	Attr            byte
+	NTReserved      byte
+	CreateTimeTenth byte
+	CreateTime      uint16
+	CreateDate      uint16
+	LastAccessDate  uint16
+	FirstClusterHI  uint16
+	WriteTime       uint16
+	WriteDate       uint16
+	FirstClusterLO  uint16
+	FileSize        uint32
 }
