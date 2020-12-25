@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/afero"
@@ -433,18 +436,90 @@ func (fs *Fs) MkdirAll(path string, perm os.FileMode) error {
 	panic("implement me")
 }
 
-func (fs *Fs) Open(name string) (afero.File, error) {
-	// TODO: check name
-	return File{
-		fs:           fs,
-		path:         name,
-		isDirectory:  true,
-		isReadOnly:   false,
-		isHidden:     false,
-		isSystem:     false,
-		firstCluster: 0,
-		size:         0,
-	}, nil
+func (fs *Fs) Open(path string) (afero.File, error) {
+	path = filepath.ToSlash(path)
+
+	// For root just return a fake-file.
+	if path == "/" {
+		fakeEntry := EntryHeader{
+			Name:            [11]byte{' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '},
+			Attr:            AttrDirectory,
+			NTReserved:      0,
+			CreateTimeTenth: 0,
+			CreateTime:      0,
+			CreateDate:      0,
+			LastAccessDate:  0,
+			FirstClusterHI:  0,
+			WriteTime:       0,
+			WriteDate:       0,
+			FirstClusterLO:  0,
+			FileSize:        0,
+		}
+
+		return File{
+			fs:           fs,
+			path:         path,
+			isDirectory:  true,
+			isReadOnly:   false,
+			isHidden:     false,
+			isSystem:     false,
+			firstCluster: 0,
+			size:         0,
+			stat:         fakeEntry.FileInfo(),
+		}, nil
+	}
+
+	// Remove suffix-slash.
+	path = strings.TrimSuffix(path, "/")
+	dirParts := strings.Split(path, "/")
+
+	content, err := fs.readRoot()
+	if err != nil {
+		return nil, err
+	}
+
+	// Go through the path until the last pathPart and then use the contents of that folder as result.
+pathLoop:
+	for i, pathPart := range dirParts {
+		if pathPart == "" {
+			continue
+		}
+
+		for _, entry := range content {
+			fileInfo := entry.FileInfo()
+			// Note: FAT is not case sensitive.
+			if strings.ToUpper(strings.Trim(fileInfo.Name(), " ")) == strings.ToUpper(pathPart) {
+				// If it is the last one return it as a File.
+				if i == len(dirParts)-1 {
+					return File{
+						fs:           fs,
+						path:         path,
+						isDirectory:  fileInfo.IsDir(),
+						isReadOnly:   entry.Attr&AttrReadOnly == AttrReadOnly,
+						isHidden:     entry.Attr&AttrHidden == AttrHidden,
+						isSystem:     entry.Attr&AttrSystem == AttrSystem,
+						firstCluster: fatEntry(uint32(entry.FirstClusterHI)<<16 | uint32(entry.FirstClusterLO)),
+						size:         entry.FileSize,
+						stat:         entry.FileInfo(),
+					}, nil
+				}
+
+				if !fileInfo.IsDir() {
+					return nil, syscall.ENOTDIR
+				}
+
+				content, err = fs.readDir(fatEntry(uint32(entry.FirstClusterHI)<<16 | uint32(entry.FirstClusterLO)))
+				if err != nil {
+					return nil, err
+				}
+
+				continue pathLoop
+			}
+		}
+		return nil, errors.New("path doesn't exist")
+	}
+
+	return nil, errors.New("path doesn't exist")
 }
 
 func (fs *Fs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {

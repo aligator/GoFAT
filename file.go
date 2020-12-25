@@ -1,10 +1,7 @@
 package gofat
 
 import (
-	"errors"
 	"os"
-	"path/filepath"
-	"strings"
 	"syscall"
 )
 
@@ -17,12 +14,23 @@ type File struct {
 	isHidden    bool
 	isSystem    bool
 
-	firstCluster uint32
+	firstCluster fatEntry
 	size         uint32
+	stat         os.FileInfo
 }
 
 func (f File) Close() error {
-	panic("implement me")
+	f.fs = nil
+	f.path = ""
+	f.isDirectory = false
+	f.isReadOnly = false
+	f.isHidden = false
+	f.isSystem = false
+	f.firstCluster = 0
+	f.size = 0
+	f.stat = nil
+
+	return nil
 }
 
 func (f File) Read(p []byte) (n int, err error) {
@@ -54,42 +62,20 @@ func (f File) Readdir(count int) ([]os.FileInfo, error) {
 		return nil, syscall.ENOTDIR
 	}
 
-	content, err := f.fs.readRoot()
+	var content []EntryHeader
+	var err error
+	if f.path == "/" {
+		content, err = f.fs.readRoot()
+	} else {
+		content, err = f.fs.readDir(f.firstCluster)
+	}
+
 	if err != nil {
 		return nil, err
 	}
 
-	path := filepath.ToSlash(f.path)
-	pathParts := strings.Split(path, "/")
-
-	// Go through the path until the last pathPart and then use the contents of that folder as result.
-pathLoop:
-	for _, pathPart := range pathParts {
-		if pathPart == "" {
-			continue
-		}
-
-		for _, entry := range content {
-			fileInfo := entry.FileInfo()
-			// Note: FAT is not case sensitive.
-			if strings.ToUpper(strings.Trim(fileInfo.Name(), " ")) == strings.ToUpper(pathPart) {
-				if !fileInfo.IsDir() {
-					return nil, syscall.ENOTDIR
-				}
-
-				content, err = f.fs.readDir(fatEntry(uint32(entry.FirstClusterHI)<<16 | uint32(entry.FirstClusterLO)))
-				if err != nil {
-					return nil, err
-				}
-
-				continue pathLoop
-			}
-		}
-		return nil, errors.New("path doesn't exist")
-	}
-
-	// TODO: Maybe support the count param directly in readRoot to avoid reading too much.
-	//       (Not that easy though because of e.g. we still have to load the whole path)
+	// TODO: Maybe support the count param directly in readDir to avoid reading too much.
+	//       (Not sure if that's easy and worth it)
 	if count > 0 {
 		content = content[:count]
 	}
@@ -117,7 +103,7 @@ func (f File) Readdirnames(n int) ([]string, error) {
 }
 
 func (f File) Stat() (os.FileInfo, error) {
-	panic("implement me")
+	return f.stat, nil
 }
 
 func (f File) Sync() error {
