@@ -101,7 +101,7 @@ func (fs *Fs) readFile(cluster fatEntry) ([]byte, error) {
 	return data, nil
 }
 
-func (fs *Fs) readDir(cluster fatEntry) ([]os.FileInfo, error) {
+func (fs *Fs) readDir(cluster fatEntry) ([]EntryHeader, error) {
 	data, err := fs.readFile(cluster)
 	if err != nil {
 		return nil, err
@@ -115,7 +115,7 @@ func (fs *Fs) readDir(cluster fatEntry) ([]os.FileInfo, error) {
 	}
 
 	// Convert to fatFiles and filter empty entries.
-	directory := make([]os.FileInfo, 0)
+	directory := make([]EntryHeader, 0)
 	for _, entry := range entries {
 		if entry == (EntryHeader{}) {
 			break
@@ -126,13 +126,13 @@ func (fs *Fs) readDir(cluster fatEntry) ([]os.FileInfo, error) {
 			continue
 		}
 
-		directory = append(directory, entry.FileInfo())
+		directory = append(directory, entry)
 	}
 
 	return directory, nil
 }
 
-func (fs *Fs) readRoot() ([]os.FileInfo, error) {
+func (fs *Fs) readRoot() ([]EntryHeader, error) {
 	if fs.info.FSType == FAT12 {
 		panic("not supported")
 	}
