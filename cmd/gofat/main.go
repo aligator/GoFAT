@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/spf13/afero"
+	"io"
 	"os"
 
 	"github.com/aligator/gofat"
@@ -62,7 +63,21 @@ func main() {
 	fmt.Println("\n\nContent of " + stat.Name() + ":\n\n" + string(buffer))
 
 	buffer = make([]byte, 52)
-	n, err = file.ReadAt(buffer, 9+52*199)
+	offset, err := file.Seek(9, io.SeekStart)
+	if err != nil {
+		fmt.Println("could not seek", err)
+		os.Exit(1)
+	}
+
+	fmt.Println(offset, err)
+	offset, err = file.Seek(52*199, io.SeekCurrent)
+	if err != nil {
+		fmt.Println("could not seek", err)
+		os.Exit(1)
+	}
+	fmt.Println(offset, err)
+
+	n, err = file.Read(buffer)
 	if err != nil {
 		fmt.Println("could not read the file", err)
 		os.Exit(1)

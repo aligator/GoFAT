@@ -4,6 +4,8 @@ import (
 	"io"
 	"os"
 	"syscall"
+
+	"github.com/spf13/afero"
 )
 
 type File struct {
@@ -18,9 +20,10 @@ type File struct {
 	firstCluster fatEntry
 	size         uint32
 	stat         os.FileInfo
+	offset       int64
 }
 
-func (f File) Close() error {
+func (f *File) Close() error {
 	f.fs = nil
 	f.path = ""
 	f.isDirectory = false
@@ -34,8 +37,8 @@ func (f File) Close() error {
 	return nil
 }
 
-func (f File) Read(p []byte) (n int, err error) {
-	data, err := f.fs.readFile(f.firstCluster, len(p))
+func (f *File) Read(p []byte) (n int, err error) {
+	data, err := f.fs.readFileAt(f.firstCluster, f.offset, len(p))
 	if err != nil {
 		return len(data), err
 	}
@@ -44,7 +47,7 @@ func (f File) Read(p []byte) (n int, err error) {
 	return len(data), nil
 }
 
-func (f File) ReadAt(p []byte, off int64) (n int, err error) {
+func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
 	size := len(p)
 	data, err := f.fs.readFileAt(f.firstCluster, off, size)
 	if err != nil {
@@ -58,23 +61,38 @@ func (f File) ReadAt(p []byte, off int64) (n int, err error) {
 	return len(data), nil
 }
 
-func (f File) Seek(offset int64, whence int) (int64, error) {
+func (f *File) Seek(offset int64, whence int) (int64, error) {
+	switch whence {
+	case io.SeekStart:
+	case io.SeekCurrent:
+		offset = f.offset + offset
+	case io.SeekEnd:
+		offset = f.stat.Size() - offset
+	default:
+		return 0, syscall.EINVAL
+	}
+
+	if offset < 0 || offset > f.stat.Size() {
+		return 0, afero.ErrOutOfRange
+	}
+
+	f.offset = offset
+	return offset, nil
+}
+
+func (f *File) Write(p []byte) (n int, err error) {
 	panic("implement me")
 }
 
-func (f File) Write(p []byte) (n int, err error) {
+func (f *File) WriteAt(p []byte, off int64) (n int, err error) {
 	panic("implement me")
 }
 
-func (f File) WriteAt(p []byte, off int64) (n int, err error) {
-	panic("implement me")
-}
-
-func (f File) Name() string {
+func (f *File) Name() string {
 	return f.stat.Name()
 }
 
-func (f File) Readdir(count int) ([]os.FileInfo, error) {
+func (f *File) Readdir(count int) ([]os.FileInfo, error) {
 	if !f.isDirectory {
 		return nil, syscall.ENOTDIR
 	}
@@ -105,7 +123,7 @@ func (f File) Readdir(count int) ([]os.FileInfo, error) {
 	return result, nil
 }
 
-func (f File) Readdirnames(n int) ([]string, error) {
+func (f *File) Readdirnames(n int) ([]string, error) {
 	content, err := f.Readdir(n)
 	if err != nil {
 		return nil, err
@@ -119,18 +137,18 @@ func (f File) Readdirnames(n int) ([]string, error) {
 	return names, nil
 }
 
-func (f File) Stat() (os.FileInfo, error) {
+func (f *File) Stat() (os.FileInfo, error) {
 	return f.stat, nil
 }
 
-func (f File) Sync() error {
+func (f *File) Sync() error {
 	panic("implement me")
 }
 
-func (f File) Truncate(size int64) error {
+func (f *File) Truncate(size int64) error {
 	panic("implement me")
 }
 
-func (f File) WriteString(s string) (ret int, err error) {
-	panic("implement me")
+func (f *File) WriteString(s string) (ret int, err error) {
+	return f.Write([]byte(s))
 }

@@ -80,14 +80,6 @@ func NewSkipChecks(reader io.ReadSeeker) (*Fs, error) {
 	return fs, err
 }
 
-// readFile reads a file starting at the given cluster.
-// It only returns max the requested amount of bytes.
-// If size is <= 0 it returns the whole file.
-// If size is > filesize it also just returns the whole file.
-func (fs *Fs) readFile(cluster fatEntry, size int) ([]byte, error) {
-	return fs.readFileAt(cluster, 0, size)
-}
-
 // readFileAt reads a file which starts at the given cluster but it skips
 // the first bytes so that is starts reading at the given offset.
 // It only returns max the requested amount of bytes.
@@ -306,7 +298,7 @@ func (fs *Fs) readDirAtSector(sectorNum uint32) ([]ExtendedEntryHeader, error) {
 }
 
 func (fs *Fs) readDir(cluster fatEntry) ([]ExtendedEntryHeader, error) {
-	data, err := fs.readFile(cluster, 0)
+	data, err := fs.readFileAt(cluster, 0, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -639,7 +631,7 @@ func (fs *Fs) Open(path string) (afero.File, error) {
 			},
 		}
 
-		return File{
+		return &File{
 			fs:          fs,
 			path:        path,
 			isDirectory: true,
@@ -669,7 +661,7 @@ pathLoop:
 			if strings.ToUpper(strings.Trim(fileInfo.Name(), " ")) == strings.ToUpper(pathPart) {
 				// If it is the last one return it as a File.
 				if i == len(dirParts)-1 {
-					return File{
+					return &File{
 						fs:           fs,
 						path:         path,
 						isDirectory:  fileInfo.IsDir(),
