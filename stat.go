@@ -5,8 +5,6 @@ import (
 	"time"
 )
 
-// TODO: Support long file names.
-
 func (h *ExtendedEntryHeader) FileInfo() os.FileInfo {
 	return entryHeaderFileInfo{*h}
 }
