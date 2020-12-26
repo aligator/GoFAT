@@ -23,8 +23,13 @@ func main() {
 
 	defer fsFile.Close()
 
-	fat := gofat.New(fsFile)
-	fmt.Printf("Opened volume '%v'\n\n", fat.Label())
+	fat, err := gofat.New(fsFile)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Opened volume '%v' with type %v\n\n", fat.Label(), fat.FSType())
 
 	afero.Walk(fat, "/", func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -35,7 +40,7 @@ func main() {
 		return nil
 	})
 
-	file, err := fat.Open("/grub/themes/starfield/README")
+	file, err := fat.Open("/README.md")
 	if err != nil {
 		fmt.Println("could not open the root file", err)
 		os.Exit(1)
@@ -54,5 +59,5 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println(stat.Size(), n)
-	fmt.Println(string(buffer))
+	fmt.Println("\n\nContent of " + stat.Name() + ":\n\n" + string(buffer))
 }
