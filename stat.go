@@ -7,15 +7,18 @@ import (
 
 // TODO: Support long file names.
 
-func (h *EntryHeader) FileInfo() os.FileInfo {
+func (h *ExtendedEntryHeader) FileInfo() os.FileInfo {
 	return entryHeaderFileInfo{*h}
 }
 
 type entryHeaderFileInfo struct {
-	entry EntryHeader
+	entry ExtendedEntryHeader
 }
 
 func (e entryHeaderFileInfo) Name() string {
+	if e.entry.ExtendedName != "" {
+		return e.entry.ExtendedName
+	}
 	return string(e.entry.Name[:])
 }
 
@@ -35,7 +38,7 @@ func (e entryHeaderFileInfo) ModTime() time.Time {
 }
 
 func (e entryHeaderFileInfo) IsDir() bool {
-	return e.entry.Attr&0x10 == 0x10
+	return e.entry.Attribute&0x10 == 0x10
 }
 
 func (e entryHeaderFileInfo) Sys() interface{} {

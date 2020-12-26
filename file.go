@@ -62,7 +62,7 @@ func (f File) Readdir(count int) ([]os.FileInfo, error) {
 		return nil, syscall.ENOTDIR
 	}
 
-	var content []EntryHeader
+	var content []ExtendedEntryHeader
 	var err error
 	if f.path == "/" {
 		content, err = f.fs.readRoot()

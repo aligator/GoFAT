@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -104,7 +105,7 @@ func (fs *Fs) readFile(cluster fatEntry) ([]byte, error) {
 	return data, nil
 }
 
-func (fs *Fs) readDir(cluster fatEntry) ([]EntryHeader, error) {
+func (fs *Fs) readDir(cluster fatEntry) ([]ExtendedEntryHeader, error) {
 	data, err := fs.readFile(cluster)
 	if err != nil {
 		return nil, err
@@ -118,24 +119,91 @@ func (fs *Fs) readDir(cluster fatEntry) ([]EntryHeader, error) {
 	}
 
 	// Convert to fatFiles and filter empty entries.
-	directory := make([]EntryHeader, 0)
-	for _, entry := range entries {
-		if entry == (EntryHeader{}) {
+	var longFilename []LongFilenameEntry
+	directory := make([]ExtendedEntryHeader, 0)
+	for i, entry := range entries {
+		// Check the first byte of the name as it may contain special values.
+		// End of FAT
+		if entry.Name[0] == 0x00 {
 			break
 		}
 
-		// Filter out not displayed entries
-		if entry.Attr&AttrVolumeId == AttrVolumeId {
+		// Dot-entry (e.g. .. or .) Note that 0x2E is actually a '.'.
+		if entry.Name[0] == 0x2E {
+			// For now nothing to do, maybe later.
+		}
+
+		// Deleted Entry
+		if entry.Name[0] == 0xE5 {
 			continue
 		}
 
-		directory = append(directory, entry)
+		// Initial character is actually 0xE5
+		if entry.Name[0] == 0x05 {
+			entry.Name[0] = 0xE5
+		}
+
+		// Save extended file name parts.
+		if entry.Attribute&AttrLongName == AttrLongName {
+			// First get the bytes again but only for this one entry.
+			entryBytes := data[i*32 : (i+1)*32]
+
+			// Then parse it as LongFilenameEntry.
+			longFilenameEntry := LongFilenameEntry{}
+			err = binary.Read(bytes.NewReader(entryBytes), binary.LittleEndian, &longFilenameEntry)
+			if err != nil {
+				return nil, err
+			}
+
+			// Ignore deleted entry.
+			if longFilenameEntry.Sequence == 0xE5 {
+				continue
+			}
+
+			longFilename = append(longFilename, longFilenameEntry)
+			continue
+		}
+
+		// Filter out not displayed entries.
+		if entry.Attribute&AttrVolumeId == AttrVolumeId {
+			// Reset long filename for next file.
+			longFilename = nil
+			continue
+		}
+
+		newEntry := ExtendedEntryHeader{EntryHeader: entry}
+		if longFilename != nil {
+			sort.SliceStable(longFilename, func(i, j int) bool {
+				// Sort by the Sequence number field:
+				// (bit 6: last logical, first physical LFN entry, bit 5: 0; bits 4-0: number 0x01..0x14 (0x1F), deleted entry: 0xE5)
+
+				return longFilename[i].Sequence&0b0001111 < longFilename[j].Sequence&0b0001111
+			})
+
+			var chars []uint16
+			for _, namePart := range longFilename {
+				chars = append(chars, namePart.First[:]...)
+				chars = append(chars, namePart.Second[:]...)
+				chars = append(chars, namePart.Third[:]...)
+			}
+
+			for _, char := range chars {
+				if char == 0 {
+					break
+				}
+				newEntry.ExtendedName += string(char)
+			}
+		}
+		directory = append(directory, newEntry)
+
+		// Reset long filename for next file.
+		longFilename = nil
 	}
 
 	return directory, nil
 }
 
-func (fs *Fs) readRoot() ([]EntryHeader, error) {
+func (fs *Fs) readRoot() ([]ExtendedEntryHeader, error) {
 	if fs.info.FSType == FAT12 {
 		panic("not supported")
 	}
@@ -406,7 +474,7 @@ func (fs *Fs) getFatEntry(cluster fatEntry) fatEntry {
 	case FAT16:
 		fat16ClusterEntryValue := binary.LittleEndian.Uint16(fs.sector.buffer[fatEntryOffset : fatEntryOffset+2])
 
-		// convert the special values to FAT32 special values
+		// convert the special values to FAT32 special values (e.g. 0xFF -> 0x0FFFFFFF)
 		if fat16ClusterEntryValue >= 0xFFF0 && fat16ClusterEntryValue <= 0xFFFF {
 			return fatEntry(uint32(fat16ClusterEntryValue) | 0x0FFFF000&0x0FFFFFFF)
 		}
@@ -441,20 +509,21 @@ func (fs *Fs) Open(path string) (afero.File, error) {
 
 	// For root just return a fake-file.
 	if path == "/" {
-		fakeEntry := EntryHeader{
-			Name:            [11]byte{' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '},
-			Attr:            AttrDirectory,
-			NTReserved:      0,
-			CreateTimeTenth: 0,
-			CreateTime:      0,
-			CreateDate:      0,
-			LastAccessDate:  0,
-			FirstClusterHI:  0,
-			WriteTime:       0,
-			WriteDate:       0,
-			FirstClusterLO:  0,
-			FileSize:        0,
-		}
+		fakeEntry := ExtendedEntryHeader{
+			EntryHeader: EntryHeader{
+				Name:            [11]byte{' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '},
+				Attribute:       AttrDirectory,
+				NTReserved:      0,
+				CreateTimeTenth: 0,
+				CreateTime:      0,
+				CreateDate:      0,
+				LastAccessDate:  0,
+				FirstClusterHI:  0,
+				WriteTime:       0,
+				WriteDate:       0,
+				FirstClusterLO:  0,
+				FileSize:        0,
+			}}
 
 		return File{
 			fs:           fs,
@@ -495,9 +564,9 @@ pathLoop:
 						fs:           fs,
 						path:         path,
 						isDirectory:  fileInfo.IsDir(),
-						isReadOnly:   entry.Attr&AttrReadOnly == AttrReadOnly,
-						isHidden:     entry.Attr&AttrHidden == AttrHidden,
-						isSystem:     entry.Attr&AttrSystem == AttrSystem,
+						isReadOnly:   entry.Attribute&AttrReadOnly == AttrReadOnly,
+						isHidden:     entry.Attribute&AttrHidden == AttrHidden,
+						isSystem:     entry.Attribute&AttrSystem == AttrSystem,
 						firstCluster: fatEntry(uint32(entry.FirstClusterHI)<<16 | uint32(entry.FirstClusterLO)),
 						size:         entry.FileSize,
 						stat:         entry.FileInfo(),

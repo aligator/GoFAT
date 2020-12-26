@@ -47,7 +47,7 @@ type FAT32SpecificData struct {
 
 type EntryHeader struct {
 	Name            [11]byte
-	Attr            byte
+	Attribute       byte
 	NTReserved      byte
 	CreateTimeTenth byte
 	CreateTime      uint16
@@ -58,4 +58,20 @@ type EntryHeader struct {
 	WriteDate       uint16
 	FirstClusterLO  uint16
 	FileSize        uint32
+}
+
+type LongFilenameEntry struct {
+	Sequence  byte
+	First     [5]uint16
+	Attribute byte
+	EntryType byte
+	Checksum  byte
+	Second    [6]uint16
+	Zero      [2]byte
+	Third     [2]uint16
+}
+
+type ExtendedEntryHeader struct {
+	EntryHeader
+	ExtendedName string
 }

@@ -23,7 +23,7 @@ func main() {
 	defer fsFile.Close()
 
 	fat := gofat.New(fsFile)
-	file, err := fat.Open("/hallo")
+	file, err := fat.Open("/")
 	if err != nil {
 		fmt.Println("could not open the root file", err)
 		os.Exit(1)
