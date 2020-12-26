@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -16,10 +15,12 @@ import (
 	"github.com/spf13/afero"
 )
 
+type FATType uint8
+
 const (
-	FAT12 = iota
-	FAT16 = iota
-	FAT32 = iota
+	FAT12 FATType = iota
+	FAT16 FATType = iota
+	FAT32 FATType = iota
 )
 
 const (
@@ -41,7 +42,7 @@ type Flags struct {
 
 // Info contains all information about the whole filesystem.
 type Info struct {
-	FSType              uint8
+	FSType              FATType
 	SectorsPerCluster   uint8
 	FirstDataSector     uint32
 	TotalSectorCount    uint32
@@ -64,7 +65,7 @@ type Fs struct {
 	sector Sector
 }
 
-func New(reader io.ReadSeeker) afero.Fs {
+func New(reader io.ReadSeeker) *Fs {
 	fs := &Fs{
 		reader: reader,
 	}
@@ -130,7 +131,9 @@ func (fs *Fs) readDir(cluster fatEntry) ([]ExtendedEntryHeader, error) {
 
 		// Dot-entry (e.g. .. or .) Note that 0x2E is actually a '.'.
 		if entry.Name[0] == 0x2E {
-			// For now nothing to do, maybe later.
+			// For now just ignore them. Don't know if we need them for something but
+			// afero.Walk cannot cope with it for now.
+			continue
 		}
 
 		// Deleted Entry
@@ -176,7 +179,6 @@ func (fs *Fs) readDir(cluster fatEntry) ([]ExtendedEntryHeader, error) {
 			sort.SliceStable(longFilename, func(i, j int) bool {
 				// Sort by the Sequence number field:
 				// (bit 6: last logical, first physical LFN entry, bit 5: 0; bits 4-0: number 0x01..0x14 (0x1F), deleted entry: 0xE5)
-
 				return longFilename[i].Sequence&0b0001111 < longFilename[j].Sequence&0b0001111
 			})
 
@@ -305,14 +307,11 @@ func (fs *Fs) initialize() error {
 
 	// Now the correct type can be determined based on the cluster count.
 	if countOfClusters < 4085 {
-		fmt.Println("found FAT12")
 		// For now do not support FAT12 as its a bit more complicated.
 		return errors.New("FAT12 is not supported")
 	} else if countOfClusters < 65525 {
-		fmt.Println("found FAT16")
 		fs.info.FSType = FAT16
 	} else {
-		fmt.Println("found FAT32")
 		fs.info.FSType = FAT32
 	}
 
@@ -343,8 +342,6 @@ func (fs *Fs) initialize() error {
 	} else {
 		fs.info.Label = string(fs.info.fat16Specific.BSVolumeLabel[:])
 	}
-
-	fmt.Printf("found volume \"%v\"\n", fs.info.Label)
 
 	return nil
 }
@@ -492,6 +489,14 @@ func (fs *Fs) store() error {
 	panic("implement me")
 }
 
+func (fs *Fs) Label() string {
+	return strings.TrimRight(fs.info.Label, " ")
+}
+
+func (fs *Fs) FSType() FATType {
+	return fs.info.FSType
+}
+
 func (fs *Fs) Create(name string) (afero.File, error) {
 	panic("implement me")
 }
@@ -523,7 +528,8 @@ func (fs *Fs) Open(path string) (afero.File, error) {
 				WriteDate:       0,
 				FirstClusterLO:  0,
 				FileSize:        0,
-			}}
+			},
+		}
 
 		return File{
 			fs:           fs,
@@ -585,10 +591,10 @@ pathLoop:
 				continue pathLoop
 			}
 		}
-		return nil, errors.New("path doesn't exist")
+		return nil, errors.New("path doesn't exist1: " + path)
 	}
 
-	return nil, errors.New("path doesn't exist")
+	return nil, errors.New("path doesn't exist2: " + path)
 }
 
 func (fs *Fs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
@@ -607,8 +613,12 @@ func (fs *Fs) Rename(oldname, newname string) error {
 	panic("implement me")
 }
 
-func (fs *Fs) Stat(name string) (os.FileInfo, error) {
-	panic("implement me")
+func (fs *Fs) Stat(path string) (os.FileInfo, error) {
+	file, err := fs.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	return file.Stat()
 }
 
 func (fs *Fs) Name() string {

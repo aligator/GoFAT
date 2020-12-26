@@ -54,7 +54,7 @@ func (f File) WriteAt(p []byte, off int64) (n int, err error) {
 }
 
 func (f File) Name() string {
-	panic("implement me")
+	return f.stat.Name()
 }
 
 func (f File) Readdir(count int) ([]os.FileInfo, error) {

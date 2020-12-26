@@ -2,6 +2,7 @@ package gofat
 
 import (
 	"os"
+	"strings"
 	"time"
 )
 
@@ -17,7 +18,15 @@ func (e entryHeaderFileInfo) Name() string {
 	if e.entry.ExtendedName != "" {
 		return e.entry.ExtendedName
 	}
-	return string(e.entry.Name[:])
+
+	name := strings.TrimRight(string(e.entry.Name[:8]), " ")
+	ext := strings.TrimRight(string(e.entry.Name[9:11]), " ")
+
+	if ext != "" {
+		name += "."
+	}
+
+	return name + ext
 }
 
 func (e entryHeaderFileInfo) Size() int64 {

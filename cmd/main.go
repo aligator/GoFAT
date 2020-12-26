@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/spf13/afero"
 	"os"
 
 	"github.com/aligator/gofat"
@@ -23,6 +24,8 @@ func main() {
 	defer fsFile.Close()
 
 	fat := gofat.New(fsFile)
+	fmt.Printf("Opened volume '%v'\n\n", fat.Label())
+
 	file, err := fat.Open("/")
 	if err != nil {
 		fmt.Println("could not open the root file", err)
@@ -38,4 +41,14 @@ func main() {
 	}
 
 	fmt.Println(content)
+
+	afero.Walk(fat, "/", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			fmt.Println(err)
+			return err
+		}
+		fmt.Println(path, info.IsDir())
+		return nil
+	})
+
 }
