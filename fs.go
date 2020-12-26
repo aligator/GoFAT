@@ -47,7 +47,7 @@ type Info struct {
 	Label               string
 	fat32Specific       FAT32SpecificData
 	fat16Specific       FAT16SpecificData
-	RootEntryCount      uint16 // this is only needed for < FAT32
+	RootEntryCount      uint16 // RootEntryCount is only needed for < FAT32.
 }
 
 type Sector struct {
