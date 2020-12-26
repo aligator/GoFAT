@@ -44,7 +44,13 @@ func (f File) Read(p []byte) (n int, err error) {
 }
 
 func (f File) ReadAt(p []byte, off int64) (n int, err error) {
-	panic("implement me")
+	data, err := f.fs.readFileAt(f.firstCluster, off, len(p))
+	if err != nil {
+		return 0, err
+	}
+
+	copy(p, data)
+	return len(data), nil
 }
 
 func (f File) Seek(offset int64, whence int) (int64, error) {

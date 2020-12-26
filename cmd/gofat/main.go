@@ -60,4 +60,13 @@ func main() {
 	}
 	fmt.Println(stat.Size(), n)
 	fmt.Println("\n\nContent of " + stat.Name() + ":\n\n" + string(buffer))
+
+	buffer = make([]byte, 52)
+	n, err = file.ReadAt(buffer, 9+52*199)
+	if err != nil {
+		fmt.Println("could not read the file", err)
+		os.Exit(1)
+	}
+	fmt.Println(stat.Size(), n)
+	fmt.Println("\n\nContent of " + stat.Name() + " starting at byte 10:\n\n" + string(buffer))
 }

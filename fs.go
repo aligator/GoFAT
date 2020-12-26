@@ -91,15 +91,55 @@ func NewSkipChecks(reader io.ReadSeeker) (*Fs, error) {
 // If size is <= 0 it returns the whole file.
 // If size is > filesize it also just returns the whole file.
 func (fs *Fs) readFile(cluster fatEntry, size int) ([]byte, error) {
+	return fs.readFileAt(cluster, 0, size)
+}
+
+// readFileAt reads a file which starts at the given cluster but it skips
+// the first bytes so that is starts reading at the given offset.
+// It only returns max the requested amount of bytes.
+// If size is <= 0 it returns the whole file.
+// If size is > filesize it also just returns the whole file.
+func (fs *Fs) readFileAt(cluster fatEntry, offset int64, size int) ([]byte, error) {
 	data := make([]byte, 0)
 	clusterNumber := 0
 	currentCluster := cluster
+
+	// offsetRest contains the offset which is needed for the actual first sector.
+	// for more easy calculation. This value gets updated everytime some bytes get skipped.
+	offsetRest := offset
+
+	// Find the cluster to start.
+	// We still have to load the cluster number chain.
 	for {
+		if int64(clusterNumber)*int64(fs.info.SectorsPerCluster)*int64(fs.info.BytesPerSector) <= offset &&
+			int64(clusterNumber+1)*int64(fs.info.SectorsPerCluster)*int64(fs.info.BytesPerSector) >= offset {
+			break
+		}
+
 		nextCluster := fs.getFatEntry(currentCluster)
 
+		if !nextCluster.ReadAsNextCluster() {
+			return data, nil
+		}
+
+		currentCluster = nextCluster
+		clusterNumber++
+	}
+
+	offsetRest -= int64(clusterNumber) * int64(fs.info.SectorsPerCluster) * int64(fs.info.BytesPerSector)
+
+	skip := uint8(0)
+	// Calculate the sectors to skip for the first sector.
+	skip = uint8(offsetRest / int64(fs.info.BytesPerSector))
+	offsetRest -= int64(fs.info.BytesPerSector) * int64(skip)
+
+	// Read the clusters.
+	for {
 		firstSectorOfCluster := ((currentCluster.Value() - 2) * uint32(fs.info.SectorsPerCluster)) + fs.info.FirstDataSector
 
-		for i := uint8(0); i < fs.info.SectorsPerCluster; i++ {
+		// Read the sectors of the cluster
+		for i := skip; i < fs.info.SectorsPerCluster; i++ {
+			skip = 0
 			fs.fetch(firstSectorOfCluster + uint32(i))
 			newData := make([]byte, fs.info.BytesPerSector)
 			err := binary.Read(bytes.NewReader(fs.sector.buffer), binary.LittleEndian, &newData)
@@ -107,15 +147,23 @@ func (fs *Fs) readFile(cluster fatEntry, size int) ([]byte, error) {
 				return nil, err
 			}
 
+			// Trim the first bytes based on the offset if it is the first read.
+			if len(data) == 0 {
+				data = append(data, newData[offsetRest:]...)
+				continue
+			}
+
 			data = append(data, newData...)
 		}
 
-		if !nextCluster.ReadAsNextCluster() {
+		// Stop when the size needed is reached.
+		if size > 0 && (clusterNumber+1)*int(fs.info.SectorsPerCluster)*int(fs.info.BytesPerSector) >= int(offset)+size {
 			break
 		}
 
-		// Stop when the size needed is reached.
-		if size > 0 && clusterNumber*int(fs.info.SectorsPerCluster)*int(fs.info.BytesPerSector) >= size {
+		nextCluster := fs.getFatEntry(currentCluster)
+
+		if !nextCluster.ReadAsNextCluster() {
 			break
 		}
 
