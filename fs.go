@@ -255,6 +255,8 @@ func (fs *Fs) parseDir(data []byte) ([]ExtendedEntryHeader, error) {
 			})
 
 			// TODO: check checksum and if invalid ignore the long name.
+			//       Also add more sanity checks. e.g. the long filename entries have to occur in a continuous way
+			//       without something in between.
 
 			var chars []uint16
 			for _, namePart := range longFilename {
@@ -267,6 +269,7 @@ func (fs *Fs) parseDir(data []byte) ([]ExtendedEntryHeader, error) {
 				if char == 0 {
 					break
 				}
+				// Not sure if string() encodes the two-byte char correctly in all cases.
 				newEntry.ExtendedName += string(char)
 			}
 		}

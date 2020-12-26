@@ -68,5 +68,5 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println(stat.Size(), n)
-	fmt.Println("\n\nContent of " + stat.Name() + " starting at byte 10:\n\n" + string(buffer))
+	fmt.Println("\n\nContent of " + stat.Name() + " using an offset and small buffer:\n\n" + string(buffer))
 }
