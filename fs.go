@@ -74,9 +74,12 @@ func New(reader io.ReadSeeker) *Fs {
 	return fs
 }
 
-func (fs *Fs) readFile(cluster fatEntry) ([]byte, error) {
+// readFile reads a file starting at the given cluster.
+// It only returns max the requested amount of bytes.
+// If size is <= 0 it returns the whole file.
+// If size is > filesize it also just returns the whole file.
+func (fs *Fs) readFile(cluster fatEntry, size int) ([]byte, error) {
 	data := make([]byte, 0)
-
 	clusterNumber := 0
 	currentCluster := cluster
 	for {
@@ -99,15 +102,25 @@ func (fs *Fs) readFile(cluster fatEntry) ([]byte, error) {
 			break
 		}
 
+		// Stop when the size needed is reached.
+		if size > 0 && clusterNumber*int(fs.info.SectorsPerCluster)*int(fs.info.BytesPerSector) >= size {
+			break
+		}
+
 		currentCluster = nextCluster
 		clusterNumber++
 	}
 
-	return data, nil
+	// Return everything if no size is given or the file size is not as big as the requested size.
+	if size <= 0 || size > len(data) {
+		return data, nil
+	}
+
+	return data[:size], nil
 }
 
 func (fs *Fs) readDir(cluster fatEntry) ([]ExtendedEntryHeader, error) {
-	data, err := fs.readFile(cluster)
+	data, err := fs.readFile(cluster, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -181,6 +194,8 @@ func (fs *Fs) readDir(cluster fatEntry) ([]ExtendedEntryHeader, error) {
 				// (bit 6: last logical, first physical LFN entry, bit 5: 0; bits 4-0: number 0x01..0x14 (0x1F), deleted entry: 0xE5)
 				return longFilename[i].Sequence&0b0001111 < longFilename[j].Sequence&0b0001111
 			})
+
+			// TODO: check checksum and if invalid ignore the long name.
 
 			var chars []uint16
 			for _, namePart := range longFilename {
@@ -516,31 +531,16 @@ func (fs *Fs) Open(path string) (afero.File, error) {
 	if path == "/" {
 		fakeEntry := ExtendedEntryHeader{
 			EntryHeader: EntryHeader{
-				Name:            [11]byte{' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '},
-				Attribute:       AttrDirectory,
-				NTReserved:      0,
-				CreateTimeTenth: 0,
-				CreateTime:      0,
-				CreateDate:      0,
-				LastAccessDate:  0,
-				FirstClusterHI:  0,
-				WriteTime:       0,
-				WriteDate:       0,
-				FirstClusterLO:  0,
-				FileSize:        0,
+				Name:      [11]byte{' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '},
+				Attribute: AttrDirectory,
 			},
 		}
 
 		return File{
-			fs:           fs,
-			path:         path,
-			isDirectory:  true,
-			isReadOnly:   false,
-			isHidden:     false,
-			isSystem:     false,
-			firstCluster: 0,
-			size:         0,
-			stat:         fakeEntry.FileInfo(),
+			fs:          fs,
+			path:        path,
+			isDirectory: true,
+			stat:        fakeEntry.FileInfo(),
 		}, nil
 	}
 
@@ -591,10 +591,10 @@ pathLoop:
 				continue pathLoop
 			}
 		}
-		return nil, errors.New("path doesn't exist1: " + path)
+		return nil, errors.New("no matching path found: ***/" + pathPart + "/***")
 	}
 
-	return nil, errors.New("path doesn't exist2: " + path)
+	return nil, errors.New("path doesn't exist: " + path)
 }
 
 func (fs *Fs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
@@ -618,6 +618,8 @@ func (fs *Fs) Stat(path string) (os.FileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer file.Close()
+
 	return file.Stat()
 }
 

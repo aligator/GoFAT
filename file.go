@@ -34,7 +34,13 @@ func (f File) Close() error {
 }
 
 func (f File) Read(p []byte) (n int, err error) {
-	panic("implement me")
+	data, err := f.fs.readFile(f.firstCluster, len(p))
+	if err != nil {
+		return 0, err
+	}
+
+	copy(p, data)
+	return len(data), nil
 }
 
 func (f File) ReadAt(p []byte, off int64) (n int, err error) {
