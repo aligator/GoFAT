@@ -1,6 +1,7 @@
 package gofat
 
 import (
+	"io"
 	"os"
 	"syscall"
 )
@@ -36,7 +37,7 @@ func (f File) Close() error {
 func (f File) Read(p []byte) (n int, err error) {
 	data, err := f.fs.readFile(f.firstCluster, len(p))
 	if err != nil {
-		return 0, err
+		return len(data), err
 	}
 
 	copy(p, data)
@@ -44,12 +45,16 @@ func (f File) Read(p []byte) (n int, err error) {
 }
 
 func (f File) ReadAt(p []byte, off int64) (n int, err error) {
-	data, err := f.fs.readFileAt(f.firstCluster, off, len(p))
+	size := len(p)
+	data, err := f.fs.readFileAt(f.firstCluster, off, size)
 	if err != nil {
-		return 0, err
+		return len(data), err
 	}
 
 	copy(p, data)
+	if len(data) < size {
+		return len(data), io.EOF
+	}
 	return len(data), nil
 }
 

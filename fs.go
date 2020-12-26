@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -33,13 +34,6 @@ const (
 	AttrLongName  = AttrReadOnly | AttrHidden | AttrSystem | AttrVolumeId
 )
 
-type Flags struct {
-	Dirty       bool
-	Open        bool
-	SizeChanged bool
-	Root        bool
-}
-
 // Info contains all information about the whole filesystem.
 type Info struct {
 	FSType              FATType
@@ -58,14 +52,14 @@ type Info struct {
 
 type Sector struct {
 	current uint32
-	flags   Flags
 	buffer  []uint8
 }
 
 type Fs struct {
-	reader io.ReadSeeker
-	info   Info
-	sector Sector
+	lock        sync.Mutex
+	reader      io.ReadSeeker
+	info        Info
+	sectorCache Sector
 }
 
 func New(reader io.ReadSeeker) (*Fs, error) {
@@ -116,7 +110,10 @@ func (fs *Fs) readFileAt(cluster fatEntry, offset int64, size int) ([]byte, erro
 			break
 		}
 
-		nextCluster := fs.getFatEntry(currentCluster)
+		nextCluster, err := fs.getFatEntry(currentCluster)
+		if err != nil {
+			return data, err
+		}
 
 		if !nextCluster.ReadAsNextCluster() {
 			return data, nil
@@ -140,9 +137,13 @@ func (fs *Fs) readFileAt(cluster fatEntry, offset int64, size int) ([]byte, erro
 		// Read the sectors of the cluster
 		for i := skip; i < fs.info.SectorsPerCluster; i++ {
 			skip = 0
-			fs.fetch(firstSectorOfCluster + uint32(i))
+			sector, err := fs.fetch(firstSectorOfCluster + uint32(i))
+			if err != nil {
+				return data, err
+			}
+
 			newData := make([]byte, fs.info.BytesPerSector)
-			err := binary.Read(bytes.NewReader(fs.sector.buffer), binary.LittleEndian, &newData)
+			err = binary.Read(bytes.NewReader(sector.buffer), binary.LittleEndian, &newData)
 			if err != nil {
 				return nil, err
 			}
@@ -161,7 +162,10 @@ func (fs *Fs) readFileAt(cluster fatEntry, offset int64, size int) ([]byte, erro
 			break
 		}
 
-		nextCluster := fs.getFatEntry(currentCluster)
+		nextCluster, err := fs.getFatEntry(currentCluster)
+		if err != nil {
+			return data, err
+		}
 
 		if !nextCluster.ReadAsNextCluster() {
 			break
@@ -275,15 +279,19 @@ func (fs *Fs) parseDir(data []byte) ([]ExtendedEntryHeader, error) {
 	return directory, nil
 }
 
-func (fs *Fs) readDirAtSector(sector uint32) ([]ExtendedEntryHeader, error) {
+func (fs *Fs) readDirAtSector(sectorNum uint32) ([]ExtendedEntryHeader, error) {
 	rootDirSectorsCount := uint32(((fs.info.RootEntryCount * 32) + (fs.info.BytesPerSector - 1)) / fs.info.BytesPerSector)
 
 	data := make([]byte, 0)
 
 	for i := uint32(0); i < rootDirSectorsCount; i++ {
-		fs.fetch(sector + i)
+		sector, err := fs.fetch(sectorNum + i)
+		if err != nil {
+			return nil, err
+		}
+
 		newData := make([]byte, fs.info.BytesPerSector)
-		err := binary.Read(bytes.NewReader(fs.sector.buffer), binary.LittleEndian, &newData)
+		err = binary.Read(bytes.NewReader(sector.buffer), binary.LittleEndian, &newData)
 		if err != nil {
 			return nil, err
 		}
@@ -323,20 +331,23 @@ func (fs *Fs) readRoot() ([]ExtendedEntryHeader, error) {
 
 func (fs *Fs) initialize(skipChecks bool) error {
 	fs.reader.Seek(0, io.SeekStart)
+
 	// The data for the first sector is always in the first 512 so use that until the correct sector size is loaded.
 	// Note that almost all FAT filesystems use 512.
 	// Some may use 1024, 2048 or 4096 but this is not supported by many drivers.
 	fs.info.BytesPerSector = 512
-	fs.sector.buffer = make([]uint8, 512)
 
 	// Read sec0
 	// Set to a sector unequal 0 to avoid using empty buffer in fetch.
-	fs.sector.current = 0xFFFFFFFF
-	fs.fetch(0)
+	fs.sectorCache.current = 0xFFFFFFFF
+	sector, err := fs.fetch(0)
+	if err != nil {
+		return err
+	}
 
 	// Read sector as BPB
 	bpb := BPB{}
-	err := binary.Read(bytes.NewReader(fs.sector.buffer), binary.LittleEndian, &bpb)
+	err = binary.Read(bytes.NewReader(sector.buffer), binary.LittleEndian, &bpb)
 	if err != nil {
 		return err
 	}
@@ -375,7 +386,7 @@ func (fs *Fs) initialize(skipChecks bool) error {
 			return errors.New("invalid media value")
 		}
 
-		if fs.sector.buffer[510] != 0x55 || fs.sector.buffer[511] != 0xAA {
+		if sector.buffer[510] != 0x55 || sector.buffer[511] != 0xAA {
 			return errors.New("invalid signature at offset 510 / 511")
 		}
 	}
@@ -449,34 +460,33 @@ func (fs *Fs) initialize(skipChecks bool) error {
 }
 
 // fetch loads a specific single sector of the filesystem.
-func (fs *Fs) fetch(sector uint32) error {
+func (fs *Fs) fetch(sectorNum uint32) (Sector, error) {
+	fs.lock.Lock()
+	defer fs.lock.Unlock()
+
+	sector := Sector{
+		buffer: make([]byte, fs.info.BytesPerSector),
+	}
+
 	// Only load it once.
-	if sector == fs.sector.current {
-		return nil
+	if sectorNum == fs.sectorCache.current {
+		return fs.sectorCache, nil
 	}
 
-	// If already fetched sector is dirty, write it
-	if fs.sector.flags.Dirty {
-		err := fs.store()
-		if err != nil {
-			return err
-		}
-	}
-
-	// Seek to and Read the new sector.
-	_, err := fs.reader.Seek(int64(sector)*int64(fs.info.BytesPerSector), io.SeekStart)
+	// Seek to and Read the new sectorNum.
+	_, err := fs.reader.Seek(int64(sectorNum)*int64(fs.info.BytesPerSector), io.SeekStart)
 	if err != nil {
-		return err
+		return Sector{}, err
 	}
 
-	_, err = fs.reader.Read(fs.sector.buffer)
+	_, err = fs.reader.Read(sector.buffer)
 	if err != nil {
-		return err
+		return Sector{}, err
 	}
 
-	fs.sector.current = sector
-
-	return nil
+	sector.current = sectorNum
+	fs.sectorCache = sector
+	return sector, nil
 }
 
 type fatEntry uint32
@@ -551,7 +561,7 @@ func (e fatEntry) ReadAsEOF() bool {
 }
 
 // getFatEntry returns the next fat entry for the given cluster.
-func (fs *Fs) getFatEntry(cluster fatEntry) fatEntry {
+func (fs *Fs) getFatEntry(cluster fatEntry) (fatEntry, error) {
 	if fs.info.FSType == FAT12 {
 		panic("not supported")
 	}
@@ -566,22 +576,25 @@ func (fs *Fs) getFatEntry(cluster fatEntry) fatEntry {
 
 	fatSectorNumber := uint32(fs.info.ReservedSectorCount) + (fatOffset / uint32(fs.info.BytesPerSector))
 	fatEntryOffset := fatOffset % uint32(fs.info.BytesPerSector)
-	// TODO: avoid fetch to avoid setting a new sector to fs.sector
-	fs.fetch(fatSectorNumber)
+
+	sector, err := fs.fetch(fatSectorNumber)
+	if err != nil {
+		return 0, err
+	}
 
 	switch fs.info.FSType {
 	case FAT16:
-		fat16ClusterEntryValue := binary.LittleEndian.Uint16(fs.sector.buffer[fatEntryOffset : fatEntryOffset+2])
+		fat16ClusterEntryValue := binary.LittleEndian.Uint16(sector.buffer[fatEntryOffset : fatEntryOffset+2])
 
 		// convert the special values to FAT32 special values (e.g. 0xFF -> 0x0FFFFFFF)
 		if fat16ClusterEntryValue >= 0xFFF0 && fat16ClusterEntryValue <= 0xFFFF {
-			return fatEntry(uint32(fat16ClusterEntryValue) | 0x0FFFF000&0x0FFFFFFF)
+			return fatEntry(uint32(fat16ClusterEntryValue) | 0x0FFFF000&0x0FFFFFFF), nil
 		}
 
-		return fatEntry(fat16ClusterEntryValue)
+		return fatEntry(fat16ClusterEntryValue), nil
 	case FAT32:
-		fat32ClusterEntryValue := binary.LittleEndian.Uint32(fs.sector.buffer[fatEntryOffset:fatEntryOffset+4]) & 0x0FFFFFFF
-		return fatEntry(fat32ClusterEntryValue)
+		fat32ClusterEntryValue := binary.LittleEndian.Uint32(sector.buffer[fatEntryOffset:fatEntryOffset+4]) & 0x0FFFFFFF
+		return fatEntry(fat32ClusterEntryValue), nil
 	}
 
 	panic("not supported")
