@@ -46,7 +46,9 @@ This will extract the test images into `./testdata`.
 Contributions are welcome, just create issues or even better PRs.
 You may open a draft or issue first to discuss the changes you would like to implement.
 
-Some resources for how FAT works are:
+You may use github.com/cweill/gotests to generate your test boilerplate code.
+
+Some resources on how FAT works are:
 * https://en.wikipedia.org/wiki/Design_of_the_FAT_file_system
 * https://docs.microsoft.com/en-us/windows/win32/fileio/exfat-specification
 * https://wiki.osdev.org/FAT

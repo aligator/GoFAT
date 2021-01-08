@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -261,8 +262,8 @@ func (fs *Fs) parseDir(data []byte) ([]ExtendedEntryHeader, error) {
 				if char == 0 {
 					break
 				}
-				// Not sure if string() encodes the two-byte char correctly in all cases.
-				newEntry.ExtendedName += string(char)
+				// TODO: Not sure if fmt.Sprint() encodes the two-byte char correctly in all cases.
+				newEntry.ExtendedName += fmt.Sprint(char)
 			}
 		}
 		directory = append(directory, newEntry)

@@ -20,7 +20,7 @@ func (e entryHeaderFileInfo) Name() string {
 	}
 
 	name := strings.TrimRight(string(e.entry.Name[:8]), " ")
-	ext := strings.TrimRight(string(e.entry.Name[9:11]), " ")
+	ext := strings.TrimRight(string(e.entry.Name[8:11]), " ")
 
 	if ext != "" {
 		name += "."
