@@ -63,6 +63,7 @@ type Fs struct {
 	sectorCache Sector
 }
 
+// New opens a FAT filesystem from the given reader.
 func New(reader io.ReadSeeker) (*Fs, error) {
 	fs := &Fs{
 		reader: reader,
@@ -72,6 +73,9 @@ func New(reader io.ReadSeeker) (*Fs, error) {
 	return fs, err
 }
 
+// NewSkipChecks opens a FAT filesystem from the given reader just like New but
+// it skips some filesystem validations which may allow you to open not perfectly standard FAT filesystems.
+// Use with caution!
 func NewSkipChecks(reader io.ReadSeeker) (*Fs, error) {
 	fs := &Fs{
 		reader: reader,
@@ -176,6 +180,8 @@ func (fs *Fs) readFileAt(cluster fatEntry, offset int64, size int) ([]byte, erro
 	return data[:size], nil
 }
 
+// parseDir reads and interprets a directory-file. It returns a slice of ExtendedEntryHeader,
+// one for each file in the directory. It may return an error if it cannot be parsed.
 func (fs *Fs) parseDir(data []byte) ([]ExtendedEntryHeader, error) {
 	entries := make([]EntryHeader, len(data)/32)
 
@@ -262,8 +268,8 @@ func (fs *Fs) parseDir(data []byte) ([]ExtendedEntryHeader, error) {
 				if char == 0 {
 					break
 				}
-				// TODO: Not sure if fmt.Sprint() encodes the two-byte char correctly in all cases.
-				newEntry.ExtendedName += fmt.Sprint(char)
+				// TODO: Not sure if fmt.Sprintf() in combination with rune() encodes the two-byte char correctly in all cases.
+				newEntry.ExtendedName += fmt.Sprintf("%c", rune(char))
 			}
 		}
 		directory = append(directory, newEntry)
@@ -307,6 +313,8 @@ func (fs *Fs) readDir(cluster fatEntry) ([]ExtendedEntryHeader, error) {
 	return fs.parseDir(data)
 }
 
+// readRoot either reads the root directory either from the specific root sector if the type is < FAT32 or
+// from the first root cluster if the type is FAT32.
 func (fs *Fs) readRoot() ([]ExtendedEntryHeader, error) {
 	if fs.info.FSType == FAT12 {
 		panic("not supported")
@@ -325,6 +333,9 @@ func (fs *Fs) readRoot() ([]ExtendedEntryHeader, error) {
 	return root, err
 }
 
+// initialize a FAT filesystem. Some checks are done to validate if it is a valid FAT filesystem.
+// (If skipping checks is disabled.)
+// It also calculates the filesystem type.
 func (fs *Fs) initialize(skipChecks bool) error {
 	fs.reader.Seek(0, io.SeekStart)
 
@@ -392,14 +403,14 @@ func (fs *Fs) initialize(skipChecks bool) error {
 	// Calculate the cluster count to determine the FAT type.
 	var rootDirSectors uint32 = ((uint32(bpb.RootEntryCount) * 32) + (uint32(bpb.BytesPerSector) - 1)) / uint32(bpb.BytesPerSector)
 
-	err = binary.Read(bytes.NewReader(bpb.FATSpecificData[:]), binary.LittleEndian, &fs.info.fat32Specific)
-	if err != nil {
-		return err
-	}
-
 	if bpb.FATSize16 != 0 {
 		fs.info.FatSize = uint32(bpb.FATSize16)
 	} else {
+		// Read the FAT32 specific data.
+		err = binary.Read(bytes.NewReader(bpb.FATSpecificData[:]), binary.LittleEndian, &fs.info.fat32Specific)
+		if err != nil {
+			return err
+		}
 		fs.info.FatSize = fs.info.fat32Specific.FatSize
 	}
 
@@ -427,11 +438,6 @@ func (fs *Fs) initialize(skipChecks bool) error {
 		return errors.New("invalid root entry count")
 	}
 
-	err = binary.Read(bytes.NewReader(bpb.FATSpecificData[:]), binary.LittleEndian, &fs.info.fat16Specific)
-	if err != nil {
-		return err
-	}
-
 	// Now all needed data can be saved. See FAT spec for details.
 	fs.info.BytesPerSector = bpb.BytesPerSector
 	if bpb.TotalSectors16 != 0 {
@@ -449,6 +455,11 @@ func (fs *Fs) initialize(skipChecks bool) error {
 	if fs.info.FSType == FAT32 {
 		fs.info.Label = string(fs.info.fat32Specific.BSVolumeLabel[:])
 	} else {
+		err = binary.Read(bytes.NewReader(bpb.FATSpecificData[:]), binary.LittleEndian, &fs.info.fat16Specific)
+		if err != nil {
+			return err
+		}
+
 		fs.info.Label = string(fs.info.fat16Specific.BSVolumeLabel[:])
 	}
 
