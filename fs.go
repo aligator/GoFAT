@@ -549,6 +549,7 @@ func (e fatEntry) IsEOF() bool {
 
 // ReadAsNextCluster treats all values specified as "should be used as Data Cluster" in
 // https://en.wikipedia.org/wiki/Design_of_the_FAT_file_system#Cluster_values
+// as normal data clusters.
 // Use this tho check if it should be read as a normal data cluster.
 func (e fatEntry) ReadAsNextCluster() bool {
 	// TODO: e.IsReservedSometimes(): MS-DOS/PC DOS 3.3 and higher treats a value of 0xFF0[nb 11][13] on FAT12 (but not on FAT16 or FAT32)
@@ -562,7 +563,8 @@ func (e fatEntry) ReadAsNextCluster() bool {
 
 // ReadAsEOF treats all values specified as "should be read as EOF" in
 // https://en.wikipedia.org/wiki/Design_of_the_FAT_file_system#Cluster_values
-// Use this tho check if it should be read as an EOF.
+// as EOF.
+// Use this to check if it should be read as an EOF.
 func (e fatEntry) ReadAsEOF() bool {
 	return e.IsEOF() || e.IsReservedTemp()
 }
