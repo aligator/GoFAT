@@ -688,6 +688,7 @@ pathLoop:
 					}, nil
 				}
 
+				// Else try to go deeper.
 				if !fileInfo.IsDir() {
 					return nil, syscall.ENOTDIR
 				}

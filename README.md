@@ -54,3 +54,13 @@ Some resources on how FAT works are:
 * https://wiki.osdev.org/FAT
 * https://github.com/ryansturmer/thinfat32
 * https://github.com/ryansturmer/thinfat32/blob/master/fatgen103.pdf
+
+## ToDo
+* More tests + CI
+* implement dates
+* implement some more attributes (e.g. hidden)
+* long filenames need some more validation according to the specs (e.g. checksum, ...)
+* implement /write support
+* support FAT12
+* Check if compatibility with TinyGo for microcontrollers is possible. That would be a good use case for this lib...
+* Use for a fuse filesystem driver
