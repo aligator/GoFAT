@@ -19,7 +19,7 @@ if err != nil {
     os.Exit(1)
 }
 
-// Now you can access any method from the afero.Fs filesystem like for example afero.Walk
+// Now you can access any method from the afero.Fs filesystem like for example afero.Walk.
 afero.Walk(fat, "/", func(path string, info os.FileInfo, err error) error {
     if err != nil {
         fmt.Println(err)
@@ -57,7 +57,6 @@ Some resources on how FAT works are:
 
 ## ToDo
 * More tests + CI
-* implement dates
 * implement some more attributes (e.g. hidden)
 * long filenames need some more validation according to the specs (e.g. checksum, ...)
 * implement /write support

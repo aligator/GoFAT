@@ -249,7 +249,146 @@ func Test_entryHeaderFileInfo_ModTime(t *testing.T) {
 		fields fields
 		want   time.Time
 	}{
-		// TODO: Add test cases.
+		{
+			name: "a normal write time and date",
+			fields: fields{entry: ExtendedEntryHeader{
+				EntryHeader: EntryHeader{
+					CreateTimeTenth: 0,
+					CreateTime:      0,
+					CreateDate:      0,
+					LastAccessDate:  0,
+					WriteTime:       41936,
+					WriteDate:       20890,
+				},
+			}},
+			want: time.Date(2020, 12, 26, 20, 30, 32, 0, time.UTC),
+		},
+		{
+			name: "a zero write time and date results in time.Time.IsZero() == true",
+			fields: fields{entry: ExtendedEntryHeader{
+				EntryHeader: EntryHeader{
+					CreateTimeTenth: 0,
+					CreateTime:      0,
+					CreateDate:      0,
+					LastAccessDate:  0,
+					WriteTime:       0,
+					WriteDate:       0,
+				},
+			}},
+			want: time.Time{},
+		},
+		{
+			name: "a zero write time results in 00:00:00.000000000",
+			fields: fields{entry: ExtendedEntryHeader{
+				EntryHeader: EntryHeader{
+					CreateTimeTenth: 0,
+					CreateTime:      0,
+					CreateDate:      0,
+					LastAccessDate:  0,
+					WriteTime:       0,
+					WriteDate:       20890,
+				},
+			}},
+			want: time.Date(2020, 12, 26, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name: "a zero write date results in time.Time.IsZero() == true as it's not specified by the specification",
+			fields: fields{entry: ExtendedEntryHeader{
+				EntryHeader: EntryHeader{
+					CreateTimeTenth: 0,
+					CreateTime:      0,
+					CreateDate:      0,
+					LastAccessDate:  0,
+					WriteTime:       41936,
+					WriteDate:       0,
+				},
+			}},
+			want: time.Time{},
+		},
+		{
+			name: "a zero write day results in time.Time.IsZero() == true as it's not specified by the specification",
+			fields: fields{entry: ExtendedEntryHeader{
+				EntryHeader: EntryHeader{
+					CreateTimeTenth: 0,
+					CreateTime:      0,
+					CreateDate:      0,
+					LastAccessDate:  0,
+					WriteTime:       41936,
+					WriteDate:       20928,
+				},
+			}},
+			want: time.Time{},
+		},
+		{
+			name: "a zero write month results in time.Time.IsZero() == true as it's not specified by the specification",
+			fields: fields{entry: ExtendedEntryHeader{
+				EntryHeader: EntryHeader{
+					CreateTimeTenth: 0,
+					CreateTime:      0,
+					CreateDate:      0,
+					LastAccessDate:  0,
+					WriteTime:       41936,
+					WriteDate:       20480,
+				},
+			}},
+			want: time.Time{},
+		},
+		{
+			name: "a month > 12 increases the year",
+			fields: fields{entry: ExtendedEntryHeader{
+				EntryHeader: EntryHeader{
+					CreateTimeTenth: 0,
+					CreateTime:      0,
+					CreateDate:      0,
+					LastAccessDate:  0,
+					WriteTime:       41936,
+					WriteDate:       20922,
+				},
+			}},
+			want: time.Date(2021, 1, 26, 20, 30, 32, 0, time.UTC),
+		},
+		{
+			name: "a second > 59 increases the minutes",
+			fields: fields{entry: ExtendedEntryHeader{
+				EntryHeader: EntryHeader{
+					CreateTimeTenth: 0,
+					CreateTime:      0,
+					CreateDate:      0,
+					LastAccessDate:  0,
+					WriteTime:       41951,
+					WriteDate:       20890,
+				},
+			}},
+			want: time.Date(2020, 12, 26, 20, 31, 02, 0, time.UTC),
+		},
+		{
+			name: "a minute > 59 increases the hours",
+			fields: fields{entry: ExtendedEntryHeader{
+				EntryHeader: EntryHeader{
+					CreateTimeTenth: 0,
+					CreateTime:      0,
+					CreateDate:      0,
+					LastAccessDate:  0,
+					WriteTime:       42992,
+					WriteDate:       20890,
+				},
+			}},
+			want: time.Date(2020, 12, 26, 21, 3, 32, 0, time.UTC),
+		},
+		{
+			name: "a time > 23:59:59 gets limited to 23:59:59",
+			fields: fields{entry: ExtendedEntryHeader{
+				EntryHeader: EntryHeader{
+					CreateTimeTenth: 0,
+					CreateTime:      0,
+					CreateDate:      0,
+					LastAccessDate:  0,
+					WriteTime:       51199,
+					WriteDate:       20890,
+				},
+			}},
+			want: time.Date(2020, 12, 26, 23, 59, 59, 0, time.UTC),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -258,6 +397,9 @@ func Test_entryHeaderFileInfo_ModTime(t *testing.T) {
 			}
 			if got := e.ModTime(); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("entryHeaderFileInfo.ModTime() = %v, want %v", got, tt.want)
+			}
+			if got := e.ModTime().IsZero(); got != tt.want.IsZero() {
+				t.Errorf("entryHeaderFileInfo.ModTime().IsZero() = %v, want.IsZero() %v", got, tt.want.IsZero())
 			}
 		})
 	}

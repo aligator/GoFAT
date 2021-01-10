@@ -41,7 +41,16 @@ func (e entryHeaderFileInfo) Mode() os.FileMode {
 }
 
 func (e entryHeaderFileInfo) ModTime() time.Time {
-	panic("implement me")
+	writeDate := ParseDate(e.entry.WriteDate)
+	writeTime := ParseTime(e.entry.WriteTime)
+
+	// If the date IsZero() it contained any invalid value in which case we return time.Time{}.
+	// For writeTime we cannot do that because writeTime.IsZero() is perfectly valid.
+	if writeDate.IsZero() {
+		return time.Time{}
+	}
+
+	return time.Date(writeDate.Year(), writeDate.Month(), writeDate.Day(), writeTime.Hour(), writeTime.Minute(), writeTime.Second(), 0, time.UTC)
 }
 
 func (e entryHeaderFileInfo) IsDir() bool {

@@ -9,6 +9,7 @@ import (
 	"github.com/aligator/gofat"
 )
 
+// main is just a example main to play with GoFAT.
 func main() {
 	argsWithoutProg := os.Args[1:]
 	if len(argsWithoutProg) <= 0 {
@@ -37,7 +38,7 @@ func main() {
 			fmt.Println(err)
 			return err
 		}
-		fmt.Println(path, info.IsDir())
+		fmt.Println(path, info.IsDir(), info.ModTime())
 		return nil
 	})
 
