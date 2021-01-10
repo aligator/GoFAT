@@ -8,16 +8,16 @@ import (
 	"github.com/spf13/afero"
 )
 
-// FatFileFs provides all methods needed from a fat filesystem for File.
+// fatFileFs provides all methods needed from a fat filesystem for File.
 // It mainly exists to be able to mock the Fs in tests.
-type FatFileFs interface {
+type fatFileFs interface {
 	readFileAt(cluster fatEntry, offset int64, size int) ([]byte, error)
 	readRoot() ([]ExtendedEntryHeader, error)
 	readDir(cluster fatEntry) ([]ExtendedEntryHeader, error)
 }
 
 type File struct {
-	fs   FatFileFs
+	fs   fatFileFs
 	path string
 
 	isDirectory bool

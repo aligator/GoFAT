@@ -1,6 +1,7 @@
 package gofat
 
 import (
+	"github.com/golang/mock/gomock"
 	"os"
 	"reflect"
 	"testing"
@@ -8,7 +9,7 @@ import (
 
 func TestFile_Close(t *testing.T) {
 	type fields struct {
-		fs           FatFileFs
+		fs           fatFileFs
 		path         string
 		isDirectory  bool
 		isReadOnly   bool
@@ -70,7 +71,6 @@ func TestFile_Close(t *testing.T) {
 
 func TestFile_Read(t *testing.T) {
 	type fields struct {
-		fs           FatFileFs
 		path         string
 		isDirectory  bool
 		isReadOnly   bool
@@ -84,19 +84,46 @@ func TestFile_Read(t *testing.T) {
 	type args struct {
 		p []byte
 	}
+	type mock struct {
+		readAtResult []byte
+		readAtError  error
+	}
 	tests := []struct {
 		name    string
+		mock    mock
 		fields  fields
 		args    args
 		wantN   int
 		wantErr bool
 	}{
-		// TODO: Add test cases.
+		{
+			name: "simple file",
+			mock: mock{
+				readAtResult: []byte{'H', 'e', 'l', 'l', '0', ' ', 'W', 'o', 'r', 'l', 'd'},
+				readAtError:  nil,
+			},
+			fields: fields{
+				size:         11,
+				firstCluster: 0,
+			},
+			args: args{
+				p: make([]byte, 11),
+			},
+			wantN:   11,
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			mockCtrl := gomock.NewController(t)
+			mockFs := NewMockfatFileFs(mockCtrl)
+			mockFs.EXPECT().
+				readFileAt(tt.fields.firstCluster, tt.fields.offset, len(tt.args.p)).
+				MaxTimes(1).
+				Return(tt.mock.readAtResult, tt.mock.readAtError)
+
 			f := &File{
-				fs:           tt.fields.fs,
+				fs:           mockFs,
 				path:         tt.fields.path,
 				isDirectory:  tt.fields.isDirectory,
 				isReadOnly:   tt.fields.isReadOnly,
@@ -107,6 +134,7 @@ func TestFile_Read(t *testing.T) {
 				stat:         tt.fields.stat,
 				offset:       tt.fields.offset,
 			}
+
 			gotN, err := f.Read(tt.args.p)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("File.Read() error = %v, wantErr %v", err, tt.wantErr)
@@ -115,13 +143,15 @@ func TestFile_Read(t *testing.T) {
 			if gotN != tt.wantN {
 				t.Errorf("File.Read() = %v, want %v", gotN, tt.wantN)
 			}
+
+			mockCtrl.Finish()
 		})
 	}
 }
 
 func TestFile_ReadAt(t *testing.T) {
 	type fields struct {
-		fs           FatFileFs
+		fs           fatFileFs
 		path         string
 		isDirectory  bool
 		isReadOnly   bool
@@ -173,7 +203,7 @@ func TestFile_ReadAt(t *testing.T) {
 
 func TestFile_Seek(t *testing.T) {
 	type fields struct {
-		fs           FatFileFs
+		fs           fatFileFs
 		path         string
 		isDirectory  bool
 		isReadOnly   bool
@@ -225,7 +255,7 @@ func TestFile_Seek(t *testing.T) {
 
 func TestFile_Write(t *testing.T) {
 	type fields struct {
-		fs           FatFileFs
+		fs           fatFileFs
 		path         string
 		isDirectory  bool
 		isReadOnly   bool
@@ -276,7 +306,7 @@ func TestFile_Write(t *testing.T) {
 
 func TestFile_WriteAt(t *testing.T) {
 	type fields struct {
-		fs           FatFileFs
+		fs           fatFileFs
 		path         string
 		isDirectory  bool
 		isReadOnly   bool
@@ -328,7 +358,7 @@ func TestFile_WriteAt(t *testing.T) {
 
 func TestFile_Name(t *testing.T) {
 	type fields struct {
-		fs           FatFileFs
+		fs           fatFileFs
 		path         string
 		isDirectory  bool
 		isReadOnly   bool
@@ -369,7 +399,7 @@ func TestFile_Name(t *testing.T) {
 
 func TestFile_Readdir(t *testing.T) {
 	type fields struct {
-		fs           FatFileFs
+		fs           fatFileFs
 		path         string
 		isDirectory  bool
 		isReadOnly   bool
@@ -420,7 +450,7 @@ func TestFile_Readdir(t *testing.T) {
 
 func TestFile_Readdirnames(t *testing.T) {
 	type fields struct {
-		fs           FatFileFs
+		fs           fatFileFs
 		path         string
 		isDirectory  bool
 		isReadOnly   bool
@@ -471,7 +501,7 @@ func TestFile_Readdirnames(t *testing.T) {
 
 func TestFile_Stat(t *testing.T) {
 	type fields struct {
-		fs           FatFileFs
+		fs           fatFileFs
 		path         string
 		isDirectory  bool
 		isReadOnly   bool
@@ -518,7 +548,7 @@ func TestFile_Stat(t *testing.T) {
 
 func TestFile_Sync(t *testing.T) {
 	type fields struct {
-		fs           FatFileFs
+		fs           fatFileFs
 		path         string
 		isDirectory  bool
 		isReadOnly   bool
@@ -559,7 +589,7 @@ func TestFile_Sync(t *testing.T) {
 
 func TestFile_Truncate(t *testing.T) {
 	type fields struct {
-		fs           FatFileFs
+		fs           fatFileFs
 		path         string
 		isDirectory  bool
 		isReadOnly   bool
@@ -604,7 +634,7 @@ func TestFile_Truncate(t *testing.T) {
 
 func TestFile_WriteString(t *testing.T) {
 	type fields struct {
-		fs           FatFileFs
+		fs           fatFileFs
 		path         string
 		isDirectory  bool
 		isReadOnly   bool
