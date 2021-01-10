@@ -12,7 +12,7 @@ Write support is missing, yet.
 // You can use for example os.Open(...) to open an image file or even a `/dev/sdxy` device file from linux. 
 var reader io.ReadSeeker = ...
 
-// Then create a new gofat filesystem from the reader
+// Then create a new GoFAT filesystem from the reader.
 fat, err := gofat.New(reader)
 if err != nil {
     fmt.Println(err)
