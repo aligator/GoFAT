@@ -1,10 +1,12 @@
 package gofat
 
 import (
-	"github.com/golang/mock/gomock"
+	"errors"
 	"os"
 	"reflect"
 	"testing"
+
+	"github.com/golang/mock/gomock"
 )
 
 func TestFile_Close(t *testing.T) {
@@ -70,6 +72,8 @@ func TestFile_Close(t *testing.T) {
 }
 
 func TestFile_Read(t *testing.T) {
+	anError := errors.New("a super error")
+
 	type fields struct {
 		path         string
 		isDirectory  bool
@@ -111,6 +115,22 @@ func TestFile_Read(t *testing.T) {
 			},
 			wantN:   11,
 			wantErr: false,
+		},
+		{
+			name: "error while reading",
+			mock: mock{
+				readAtResult: nil,
+				readAtError:  anError,
+			},
+			fields: fields{
+				size:         11,
+				firstCluster: 0,
+			},
+			args: args{
+				p: make([]byte, 11),
+			},
+			wantN:   0,
+			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
