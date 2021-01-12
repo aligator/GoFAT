@@ -2,6 +2,7 @@ package gofat
 
 import (
 	"errors"
+	"io"
 	"os"
 	"reflect"
 	"testing"
@@ -9,35 +10,34 @@ import (
 	"github.com/golang/mock/gomock"
 )
 
+type fileTestFields struct {
+	path         string
+	isDirectory  bool
+	isReadOnly   bool
+	isHidden     bool
+	isSystem     bool
+	firstCluster fatEntry
+	stat         os.FileInfo
+	offset       int64
+}
+
+var anError = errors.New("a super error")
+
 func TestFile_Close(t *testing.T) {
-	type fields struct {
-		fs           fatFileFs
-		path         string
-		isDirectory  bool
-		isReadOnly   bool
-		isHidden     bool
-		isSystem     bool
-		firstCluster fatEntry
-		size         uint32
-		stat         os.FileInfo
-		offset       int64
-	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fields  fileTestFields
 		wantErr bool
 	}{
 		{
 			name: "just close and reset all fields",
-			fields: fields{
-				fs:           &Fs{},
+			fields: fileTestFields{
 				path:         "any path",
 				isDirectory:  true,
 				isReadOnly:   true,
 				isHidden:     true,
 				isSystem:     true,
 				firstCluster: 5,
-				size:         6,
 				stat:         entryHeaderFileInfo{},
 				offset:       7,
 			},
@@ -49,14 +49,13 @@ func TestFile_Close(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				fs:           tt.fields.fs,
+				fs:           &Fs{},
 				path:         tt.fields.path,
 				isDirectory:  tt.fields.isDirectory,
 				isReadOnly:   tt.fields.isReadOnly,
 				isHidden:     tt.fields.isHidden,
 				isSystem:     tt.fields.isSystem,
 				firstCluster: tt.fields.firstCluster,
-				size:         tt.fields.size,
 				stat:         tt.fields.stat,
 				offset:       tt.fields.offset,
 			}
@@ -72,19 +71,6 @@ func TestFile_Close(t *testing.T) {
 }
 
 func TestFile_Read(t *testing.T) {
-	anError := errors.New("a super error")
-
-	type fields struct {
-		path         string
-		isDirectory  bool
-		isReadOnly   bool
-		isHidden     bool
-		isSystem     bool
-		firstCluster fatEntry
-		size         uint32
-		stat         os.FileInfo
-		offset       int64
-	}
 	type args struct {
 		p []byte
 	}
@@ -93,21 +79,20 @@ func TestFile_Read(t *testing.T) {
 		readAtError  error
 	}
 	tests := []struct {
-		name    string
-		mock    mock
-		fields  fields
-		args    args
-		wantN   int
-		wantErr bool
+		name     string
+		mockData mock
+		fields   fileTestFields
+		args     args
+		wantN    int
+		wantErr  bool
 	}{
 		{
 			name: "simple file",
-			mock: mock{
+			mockData: mock{
 				readAtResult: []byte{'H', 'e', 'l', 'l', '0', ' ', 'W', 'o', 'r', 'l', 'd'},
 				readAtError:  nil,
 			},
-			fields: fields{
-				size:         11,
+			fields: fileTestFields{
 				firstCluster: 0,
 			},
 			args: args{
@@ -117,13 +102,28 @@ func TestFile_Read(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "simple file with offset",
+			mockData: mock{
+				readAtResult: []byte{' ', 'W', 'o', 'r', 'l', 'd'},
+				readAtError:  nil,
+			},
+			fields: fileTestFields{
+				firstCluster: 0,
+				offset:       5,
+			},
+			args: args{
+				p: make([]byte, 6),
+			},
+			wantN:   6,
+			wantErr: false,
+		},
+		{
 			name: "error while reading",
-			mock: mock{
+			mockData: mock{
 				readAtResult: nil,
 				readAtError:  anError,
 			},
-			fields: fields{
-				size:         11,
+			fields: fileTestFields{
 				firstCluster: 0,
 			},
 			args: args{
@@ -140,7 +140,7 @@ func TestFile_Read(t *testing.T) {
 			mockFs.EXPECT().
 				readFileAt(tt.fields.firstCluster, tt.fields.offset, len(tt.args.p)).
 				MaxTimes(1).
-				Return(tt.mock.readAtResult, tt.mock.readAtError)
+				Return(tt.mockData.readAtResult, tt.mockData.readAtError)
 
 			f := &File{
 				fs:           mockFs,
@@ -150,7 +150,6 @@ func TestFile_Read(t *testing.T) {
 				isHidden:     tt.fields.isHidden,
 				isSystem:     tt.fields.isSystem,
 				firstCluster: tt.fields.firstCluster,
-				size:         tt.fields.size,
 				stat:         tt.fields.stat,
 				offset:       tt.fields.offset,
 			}
@@ -170,42 +169,88 @@ func TestFile_Read(t *testing.T) {
 }
 
 func TestFile_ReadAt(t *testing.T) {
-	type fields struct {
-		fs           fatFileFs
-		path         string
-		isDirectory  bool
-		isReadOnly   bool
-		isHidden     bool
-		isSystem     bool
-		firstCluster fatEntry
-		size         uint32
-		stat         os.FileInfo
-		offset       int64
-	}
 	type args struct {
 		p   []byte
 		off int64
 	}
+	type mock struct {
+		readAtResult []byte
+		readAtError  error
+	}
 	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		wantN   int
-		wantErr bool
+		name     string
+		fields   fileTestFields
+		args     args
+		mockData mock
+		wantN    int
+		wantErr  bool
 	}{
-		// TODO: Add test cases.
+		{
+			name: "simple file",
+			mockData: mock{
+				readAtResult: []byte{'e', 'l', 'l', '0', ' ', 'W', 'o', 'r', 'l', 'd'},
+				readAtError:  nil,
+			},
+			fields: fileTestFields{
+				firstCluster: 0,
+			},
+			args: args{
+				p:   make([]byte, 10),
+				off: 1,
+			},
+			wantN:   10,
+			wantErr: false,
+		},
+		{
+			name: "error while reading",
+			mockData: mock{
+				readAtResult: nil,
+				readAtError:  anError,
+			},
+			fields: fileTestFields{
+				firstCluster: 0,
+			},
+			args: args{
+				p:   make([]byte, 11),
+				off: 1,
+			},
+			wantN:   0,
+			wantErr: true,
+		},
+		{
+			name: "not enough data (EOF)",
+			mockData: mock{
+				readAtResult: []byte{'e', 'l', 'l', '0'},
+				readAtError:  nil,
+			},
+			fields: fileTestFields{
+				firstCluster: 0,
+			},
+			args: args{
+				p:   make([]byte, 10),
+				off: 1,
+			},
+			wantN:   4,
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			mockCtrl := gomock.NewController(t)
+			mockFs := NewMockfatFileFs(mockCtrl)
+			mockFs.EXPECT().
+				readFileAt(tt.fields.firstCluster, tt.args.off, len(tt.args.p)).
+				MaxTimes(1).
+				Return(tt.mockData.readAtResult, tt.mockData.readAtError)
+
 			f := &File{
-				fs:           tt.fields.fs,
+				fs:           mockFs,
 				path:         tt.fields.path,
 				isDirectory:  tt.fields.isDirectory,
 				isReadOnly:   tt.fields.isReadOnly,
 				isHidden:     tt.fields.isHidden,
 				isSystem:     tt.fields.isSystem,
 				firstCluster: tt.fields.firstCluster,
-				size:         tt.fields.size,
 				stat:         tt.fields.stat,
 				offset:       tt.fields.offset,
 			}
@@ -222,42 +267,78 @@ func TestFile_ReadAt(t *testing.T) {
 }
 
 func TestFile_Seek(t *testing.T) {
-	type fields struct {
-		fs           fatFileFs
-		path         string
-		isDirectory  bool
-		isReadOnly   bool
-		isHidden     bool
-		isSystem     bool
-		firstCluster fatEntry
-		size         uint32
-		stat         os.FileInfo
-		offset       int64
-	}
 	type args struct {
 		offset int64
 		whence int
 	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fields  fileTestFields
 		args    args
 		want    int64
 		wantErr bool
 	}{
-		// TODO: Add test cases.
+		{
+			name: "Seek from start regardless of previous offset",
+			fields: fileTestFields{
+				offset: 1234,
+				stat: entryHeaderFileInfo{entry: ExtendedEntryHeader{
+					EntryHeader: EntryHeader{
+						FileSize: 5000,
+					},
+				}},
+			},
+			args: args{
+				offset: 100,
+				whence: io.SeekStart,
+			},
+			want:    100,
+			wantErr: false,
+		},
+		{
+			name: "Seek from last offset",
+			fields: fileTestFields{
+				offset: 1000,
+				stat: entryHeaderFileInfo{entry: ExtendedEntryHeader{
+					EntryHeader: EntryHeader{
+						FileSize: 5000,
+					},
+				}},
+			},
+			args: args{
+				offset: 200,
+				whence: io.SeekCurrent,
+			},
+			want:    1200,
+			wantErr: false,
+		},
+		{
+			name: "Seek from the end",
+			fields: fileTestFields{
+				offset: 1000,
+				stat: entryHeaderFileInfo{entry: ExtendedEntryHeader{
+					EntryHeader: EntryHeader{
+						FileSize: 5000,
+					},
+				}},
+			},
+			args: args{
+				offset: 200,
+				whence: io.SeekEnd,
+			},
+			want:    4800,
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				fs:           tt.fields.fs,
 				path:         tt.fields.path,
 				isDirectory:  tt.fields.isDirectory,
 				isReadOnly:   tt.fields.isReadOnly,
 				isHidden:     tt.fields.isHidden,
 				isSystem:     tt.fields.isSystem,
 				firstCluster: tt.fields.firstCluster,
-				size:         tt.fields.size,
 				stat:         tt.fields.stat,
 				offset:       tt.fields.offset,
 			}
@@ -266,32 +347,26 @@ func TestFile_Seek(t *testing.T) {
 				t.Errorf("File.Seek() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
+
 			if got != tt.want {
 				t.Errorf("File.Seek() = %v, want %v", got, tt.want)
+			}
+
+			// f.offset must be set also.
+			if f.offset != tt.want {
+				t.Errorf("File.offset = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
 func TestFile_Write(t *testing.T) {
-	type fields struct {
-		fs           fatFileFs
-		path         string
-		isDirectory  bool
-		isReadOnly   bool
-		isHidden     bool
-		isSystem     bool
-		firstCluster fatEntry
-		size         uint32
-		stat         os.FileInfo
-		offset       int64
-	}
 	type args struct {
 		p []byte
 	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fields  fileTestFields
 		args    args
 		wantN   int
 		wantErr bool
@@ -301,14 +376,12 @@ func TestFile_Write(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				fs:           tt.fields.fs,
 				path:         tt.fields.path,
 				isDirectory:  tt.fields.isDirectory,
 				isReadOnly:   tt.fields.isReadOnly,
 				isHidden:     tt.fields.isHidden,
 				isSystem:     tt.fields.isSystem,
 				firstCluster: tt.fields.firstCluster,
-				size:         tt.fields.size,
 				stat:         tt.fields.stat,
 				offset:       tt.fields.offset,
 			}
@@ -325,25 +398,13 @@ func TestFile_Write(t *testing.T) {
 }
 
 func TestFile_WriteAt(t *testing.T) {
-	type fields struct {
-		fs           fatFileFs
-		path         string
-		isDirectory  bool
-		isReadOnly   bool
-		isHidden     bool
-		isSystem     bool
-		firstCluster fatEntry
-		size         uint32
-		stat         os.FileInfo
-		offset       int64
-	}
 	type args struct {
 		p   []byte
 		off int64
 	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fields  fileTestFields
 		args    args
 		wantN   int
 		wantErr bool
@@ -353,14 +414,12 @@ func TestFile_WriteAt(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				fs:           tt.fields.fs,
 				path:         tt.fields.path,
 				isDirectory:  tt.fields.isDirectory,
 				isReadOnly:   tt.fields.isReadOnly,
 				isHidden:     tt.fields.isHidden,
 				isSystem:     tt.fields.isSystem,
 				firstCluster: tt.fields.firstCluster,
-				size:         tt.fields.size,
 				stat:         tt.fields.stat,
 				offset:       tt.fields.offset,
 			}
@@ -377,65 +436,16 @@ func TestFile_WriteAt(t *testing.T) {
 }
 
 func TestFile_Name(t *testing.T) {
-	type fields struct {
-		fs           fatFileFs
-		path         string
-		isDirectory  bool
-		isReadOnly   bool
-		isHidden     bool
-		isSystem     bool
-		firstCluster fatEntry
-		size         uint32
-		stat         os.FileInfo
-		offset       int64
-	}
-	tests := []struct {
-		name   string
-		fields fields
-		want   string
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			f := &File{
-				fs:           tt.fields.fs,
-				path:         tt.fields.path,
-				isDirectory:  tt.fields.isDirectory,
-				isReadOnly:   tt.fields.isReadOnly,
-				isHidden:     tt.fields.isHidden,
-				isSystem:     tt.fields.isSystem,
-				firstCluster: tt.fields.firstCluster,
-				size:         tt.fields.size,
-				stat:         tt.fields.stat,
-				offset:       tt.fields.offset,
-			}
-			if got := f.Name(); got != tt.want {
-				t.Errorf("File.Name() = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	// Currently not needed as it's only a pass through to stats.
 }
 
 func TestFile_Readdir(t *testing.T) {
-	type fields struct {
-		fs           fatFileFs
-		path         string
-		isDirectory  bool
-		isReadOnly   bool
-		isHidden     bool
-		isSystem     bool
-		firstCluster fatEntry
-		size         uint32
-		stat         os.FileInfo
-		offset       int64
-	}
 	type args struct {
 		count int
 	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fields  fileTestFields
 		args    args
 		want    []os.FileInfo
 		wantErr bool
@@ -445,14 +455,12 @@ func TestFile_Readdir(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				fs:           tt.fields.fs,
 				path:         tt.fields.path,
 				isDirectory:  tt.fields.isDirectory,
 				isReadOnly:   tt.fields.isReadOnly,
 				isHidden:     tt.fields.isHidden,
 				isSystem:     tt.fields.isSystem,
 				firstCluster: tt.fields.firstCluster,
-				size:         tt.fields.size,
 				stat:         tt.fields.stat,
 				offset:       tt.fields.offset,
 			}
@@ -469,24 +477,12 @@ func TestFile_Readdir(t *testing.T) {
 }
 
 func TestFile_Readdirnames(t *testing.T) {
-	type fields struct {
-		fs           fatFileFs
-		path         string
-		isDirectory  bool
-		isReadOnly   bool
-		isHidden     bool
-		isSystem     bool
-		firstCluster fatEntry
-		size         uint32
-		stat         os.FileInfo
-		offset       int64
-	}
 	type args struct {
 		n int
 	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fields  fileTestFields
 		args    args
 		want    []string
 		wantErr bool
@@ -496,14 +492,12 @@ func TestFile_Readdirnames(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				fs:           tt.fields.fs,
 				path:         tt.fields.path,
 				isDirectory:  tt.fields.isDirectory,
 				isReadOnly:   tt.fields.isReadOnly,
 				isHidden:     tt.fields.isHidden,
 				isSystem:     tt.fields.isSystem,
 				firstCluster: tt.fields.firstCluster,
-				size:         tt.fields.size,
 				stat:         tt.fields.stat,
 				offset:       tt.fields.offset,
 			}
@@ -520,21 +514,9 @@ func TestFile_Readdirnames(t *testing.T) {
 }
 
 func TestFile_Stat(t *testing.T) {
-	type fields struct {
-		fs           fatFileFs
-		path         string
-		isDirectory  bool
-		isReadOnly   bool
-		isHidden     bool
-		isSystem     bool
-		firstCluster fatEntry
-		size         uint32
-		stat         os.FileInfo
-		offset       int64
-	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fields  fileTestFields
 		want    os.FileInfo
 		wantErr bool
 	}{
@@ -543,14 +525,12 @@ func TestFile_Stat(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				fs:           tt.fields.fs,
 				path:         tt.fields.path,
 				isDirectory:  tt.fields.isDirectory,
 				isReadOnly:   tt.fields.isReadOnly,
 				isHidden:     tt.fields.isHidden,
 				isSystem:     tt.fields.isSystem,
 				firstCluster: tt.fields.firstCluster,
-				size:         tt.fields.size,
 				stat:         tt.fields.stat,
 				offset:       tt.fields.offset,
 			}
@@ -567,21 +547,9 @@ func TestFile_Stat(t *testing.T) {
 }
 
 func TestFile_Sync(t *testing.T) {
-	type fields struct {
-		fs           fatFileFs
-		path         string
-		isDirectory  bool
-		isReadOnly   bool
-		isHidden     bool
-		isSystem     bool
-		firstCluster fatEntry
-		size         uint32
-		stat         os.FileInfo
-		offset       int64
-	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fields  fileTestFields
 		wantErr bool
 	}{
 		// TODO: Add test cases.
@@ -589,14 +557,12 @@ func TestFile_Sync(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				fs:           tt.fields.fs,
 				path:         tt.fields.path,
 				isDirectory:  tt.fields.isDirectory,
 				isReadOnly:   tt.fields.isReadOnly,
 				isHidden:     tt.fields.isHidden,
 				isSystem:     tt.fields.isSystem,
 				firstCluster: tt.fields.firstCluster,
-				size:         tt.fields.size,
 				stat:         tt.fields.stat,
 				offset:       tt.fields.offset,
 			}
@@ -608,24 +574,12 @@ func TestFile_Sync(t *testing.T) {
 }
 
 func TestFile_Truncate(t *testing.T) {
-	type fields struct {
-		fs           fatFileFs
-		path         string
-		isDirectory  bool
-		isReadOnly   bool
-		isHidden     bool
-		isSystem     bool
-		firstCluster fatEntry
-		size         uint32
-		stat         os.FileInfo
-		offset       int64
-	}
 	type args struct {
 		size int64
 	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fields  fileTestFields
 		args    args
 		wantErr bool
 	}{
@@ -634,14 +588,12 @@ func TestFile_Truncate(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				fs:           tt.fields.fs,
 				path:         tt.fields.path,
 				isDirectory:  tt.fields.isDirectory,
 				isReadOnly:   tt.fields.isReadOnly,
 				isHidden:     tt.fields.isHidden,
 				isSystem:     tt.fields.isSystem,
 				firstCluster: tt.fields.firstCluster,
-				size:         tt.fields.size,
 				stat:         tt.fields.stat,
 				offset:       tt.fields.offset,
 			}
@@ -653,24 +605,12 @@ func TestFile_Truncate(t *testing.T) {
 }
 
 func TestFile_WriteString(t *testing.T) {
-	type fields struct {
-		fs           fatFileFs
-		path         string
-		isDirectory  bool
-		isReadOnly   bool
-		isHidden     bool
-		isSystem     bool
-		firstCluster fatEntry
-		size         uint32
-		stat         os.FileInfo
-		offset       int64
-	}
 	type args struct {
 		s string
 	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fields  fileTestFields
 		args    args
 		wantRet int
 		wantErr bool
@@ -680,14 +620,12 @@ func TestFile_WriteString(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := &File{
-				fs:           tt.fields.fs,
 				path:         tt.fields.path,
 				isDirectory:  tt.fields.isDirectory,
 				isReadOnly:   tt.fields.isReadOnly,
 				isHidden:     tt.fields.isHidden,
 				isSystem:     tt.fields.isSystem,
 				firstCluster: tt.fields.firstCluster,
-				size:         tt.fields.size,
 				stat:         tt.fields.stat,
 				offset:       tt.fields.offset,
 			}

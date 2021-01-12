@@ -683,7 +683,6 @@ pathLoop:
 						isHidden:     entry.Attribute&AttrHidden == AttrHidden,
 						isSystem:     entry.Attribute&AttrSystem == AttrSystem,
 						firstCluster: fatEntry(uint32(entry.FirstClusterHI)<<16 | uint32(entry.FirstClusterLO)),
-						size:         entry.FileSize,
 						stat:         entry.FileInfo(),
 					}, nil
 				}

@@ -26,7 +26,6 @@ type File struct {
 	isSystem    bool
 
 	firstCluster fatEntry
-	size         uint32
 	stat         os.FileInfo
 	offset       int64
 }
@@ -39,7 +38,6 @@ func (f *File) Close() error {
 	f.isHidden = false
 	f.isSystem = false
 	f.firstCluster = 0
-	f.size = 0
 	f.stat = nil
 	f.offset = 0
 
