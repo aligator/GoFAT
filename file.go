@@ -51,6 +51,9 @@ func (f *File) Read(p []byte) (n int, err error) {
 	}
 
 	copy(p, data)
+	if len(data) < len(p) {
+		return len(data), io.EOF
+	}
 	return len(data), nil
 }
 

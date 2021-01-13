@@ -173,8 +173,12 @@ func (fs *Fs) readFileAt(cluster fatEntry, offset int64, size int) ([]byte, erro
 	}
 
 	// Return everything if no size is given or the file size is not as big as the requested size.
-	if size <= 0 || size > len(data) {
+	if size <= 0 {
 		return data, nil
+	}
+
+	if size > len(data) {
+		return data, io.EOF
 	}
 
 	return data[:size], nil

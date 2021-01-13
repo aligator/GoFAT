@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"syscall"
 	"testing"
 
 	"github.com/golang/mock/gomock"
@@ -84,7 +85,7 @@ func TestFile_Read(t *testing.T) {
 		fields   fileTestFields
 		args     args
 		wantN    int
-		wantErr  bool
+		wantErr  error
 	}{
 		{
 			name: "simple file",
@@ -99,7 +100,7 @@ func TestFile_Read(t *testing.T) {
 				p: make([]byte, 11),
 			},
 			wantN:   11,
-			wantErr: false,
+			wantErr: nil,
 		},
 		{
 			name: "simple file with offset",
@@ -115,12 +116,12 @@ func TestFile_Read(t *testing.T) {
 				p: make([]byte, 6),
 			},
 			wantN:   6,
-			wantErr: false,
+			wantErr: nil,
 		},
 		{
 			name: "error while reading",
 			mockData: mock{
-				readAtResult: nil,
+				readAtResult: []byte{'H'}, // Simulate error after some bytes are already read.
 				readAtError:  anError,
 			},
 			fields: fileTestFields{
@@ -129,8 +130,23 @@ func TestFile_Read(t *testing.T) {
 			args: args{
 				p: make([]byte, 11),
 			},
-			wantN:   0,
-			wantErr: true,
+			wantN:   1,
+			wantErr: anError,
+		},
+		{
+			name: "file smaller than buffer",
+			mockData: mock{
+				readAtResult: []byte{'H', 'e', 'l', 'l', '0', ' ', 'W', 'o', 'r', 'l', 'd'},
+				readAtError:  io.EOF,
+			},
+			fields: fileTestFields{
+				firstCluster: 0,
+			},
+			args: args{
+				p: make([]byte, 20),
+			},
+			wantN:   11,
+			wantErr: io.EOF,
 		},
 	}
 	for _, tt := range tests {
@@ -155,15 +171,16 @@ func TestFile_Read(t *testing.T) {
 			}
 
 			gotN, err := f.Read(tt.args.p)
-			if (err != nil) != tt.wantErr {
+
+			mockCtrl.Finish()
+
+			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("File.Read() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if gotN != tt.wantN {
 				t.Errorf("File.Read() = %v, want %v", gotN, tt.wantN)
 			}
-
-			mockCtrl.Finish()
 		})
 	}
 }
@@ -183,7 +200,7 @@ func TestFile_ReadAt(t *testing.T) {
 		args     args
 		mockData mock
 		wantN    int
-		wantErr  bool
+		wantErr  error
 	}{
 		{
 			name: "simple file",
@@ -199,7 +216,7 @@ func TestFile_ReadAt(t *testing.T) {
 				off: 1,
 			},
 			wantN:   10,
-			wantErr: false,
+			wantErr: nil,
 		},
 		{
 			name: "error while reading",
@@ -215,13 +232,13 @@ func TestFile_ReadAt(t *testing.T) {
 				off: 1,
 			},
 			wantN:   0,
-			wantErr: true,
+			wantErr: anError,
 		},
 		{
 			name: "not enough data (EOF)",
 			mockData: mock{
 				readAtResult: []byte{'e', 'l', 'l', '0'},
-				readAtError:  nil,
+				readAtError:  io.EOF,
 			},
 			fields: fileTestFields{
 				firstCluster: 0,
@@ -231,7 +248,7 @@ func TestFile_ReadAt(t *testing.T) {
 				off: 1,
 			},
 			wantN:   4,
-			wantErr: true,
+			wantErr: io.EOF,
 		},
 	}
 	for _, tt := range tests {
@@ -255,7 +272,10 @@ func TestFile_ReadAt(t *testing.T) {
 				offset:       tt.fields.offset,
 			}
 			gotN, err := f.ReadAt(tt.args.p, tt.args.off)
-			if (err != nil) != tt.wantErr {
+
+			mockCtrl.Finish()
+
+			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("File.ReadAt() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
@@ -443,18 +463,130 @@ func TestFile_Readdir(t *testing.T) {
 	type args struct {
 		count int
 	}
+	type mock struct {
+		readRootResult []ExtendedEntryHeader
+		readRootError  error
+
+		readDirResult []ExtendedEntryHeader
+		readDirError  error
+	}
 	tests := []struct {
-		name    string
-		fields  fileTestFields
-		args    args
-		want    []os.FileInfo
-		wantErr bool
+		name     string
+		fields   fileTestFields
+		args     args
+		mockData mock
+		want     []os.FileInfo
+		wantErr  error
 	}{
-		// TODO: Add test cases.
+		{
+			name: "Read root dir",
+			fields: fileTestFields{
+				path:        "/",
+				isDirectory: true,
+			},
+			args: args{
+				count: 0,
+			},
+			mockData: mock{
+				readRootResult: []ExtendedEntryHeader{
+					// Use the name to identify them in the results, they are just tested by equality.
+					{ExtendedName: "1"},
+					{ExtendedName: "2"},
+					{ExtendedName: "3"},
+				},
+				readRootError: nil,
+			},
+			want: []os.FileInfo{
+				entryHeaderFileInfo{ExtendedEntryHeader{ExtendedName: "1"}},
+				entryHeaderFileInfo{ExtendedEntryHeader{ExtendedName: "2"}},
+				entryHeaderFileInfo{ExtendedEntryHeader{ExtendedName: "3"}},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Read dir",
+			fields: fileTestFields{
+				path:        "/test",
+				isDirectory: true,
+			},
+			args: args{
+				count: 0,
+			},
+			mockData: mock{
+				readDirResult: []ExtendedEntryHeader{
+					// Use the name to identify them in the results, they are just tested by equality.
+					{ExtendedName: "1"},
+					{ExtendedName: "2"},
+					{ExtendedName: "3"},
+				},
+				readRootError: nil,
+			},
+			want: []os.FileInfo{
+				entryHeaderFileInfo{ExtendedEntryHeader{ExtendedName: "1"}},
+				entryHeaderFileInfo{ExtendedEntryHeader{ExtendedName: "2"}},
+				entryHeaderFileInfo{ExtendedEntryHeader{ExtendedName: "3"}},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "Read dir with count arg",
+			fields: fileTestFields{
+				path:        "/test",
+				isDirectory: true,
+			},
+			args: args{
+				count: 2,
+			},
+			mockData: mock{
+				readDirResult: []ExtendedEntryHeader{
+					// Use the name to identify them in the results, they are just tested by equality.
+					{ExtendedName: "1"},
+					{ExtendedName: "2"},
+					{ExtendedName: "3"},
+				},
+				readRootError: nil,
+			},
+			want: []os.FileInfo{
+				entryHeaderFileInfo{ExtendedEntryHeader{ExtendedName: "1"}},
+				entryHeaderFileInfo{ExtendedEntryHeader{ExtendedName: "2"}},
+			},
+			wantErr: nil,
+		},
+		{
+			name: "No dir",
+			fields: fileTestFields{
+				path:        "/test",
+				isDirectory: false,
+			},
+			args: args{
+				count: 0,
+			},
+			mockData: mock{},
+			want:     nil,
+			wantErr:  syscall.ENOTDIR,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			mockCtrl := gomock.NewController(t)
+			mockFs := NewMockfatFileFs(mockCtrl)
+
+			if tt.mockData.readDirResult != nil {
+				mockFs.EXPECT().
+					readDir(tt.fields.firstCluster).
+					MaxTimes(1).
+					Return(tt.mockData.readDirResult, tt.mockData.readDirError)
+			}
+
+			if tt.mockData.readRootResult != nil {
+				mockFs.EXPECT().
+					readRoot().
+					MaxTimes(1).
+					Return(tt.mockData.readRootResult, tt.mockData.readRootError)
+			}
+
 			f := &File{
+				fs:           mockFs,
 				path:         tt.fields.path,
 				isDirectory:  tt.fields.isDirectory,
 				isReadOnly:   tt.fields.isReadOnly,
@@ -465,7 +597,10 @@ func TestFile_Readdir(t *testing.T) {
 				offset:       tt.fields.offset,
 			}
 			got, err := f.Readdir(tt.args.count)
-			if (err != nil) != tt.wantErr {
+
+			mockCtrl.Finish()
+
+			if err != tt.wantErr {
 				t.Errorf("File.Readdir() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
