@@ -133,8 +133,8 @@ func (f *File) Readdir(count int) ([]os.FileInfo, error) {
 	return result, nil
 }
 
-func (f *File) Readdirnames(n int) ([]string, error) {
-	content, err := f.Readdir(n)
+func (f *File) Readdirnames(count int) ([]string, error) {
+	content, err := f.Readdir(count)
 	if err != nil {
 		return nil, err
 	}
