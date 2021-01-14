@@ -1,6 +1,6 @@
 # GoFAT
 [![Actions Status](https://github.com/aligator/gofat/workflows/build/badge.svg)](https://github.com/aligator/gofat/actions)
-[![codecov](https://codecov.io/gh/aligator/gofat/branch/master/graph/badge.svg)](https://codecov.io/gh/aligator/gofat)
+[![codecov](https://codecov.io/gh/aligator/GoFAT/branch/main/graph/badge.svg?token=EUUUT368Z0)](https://codecov.io/gh/aligator/GoFAT)
 
 A FAT filesystem implementation in Go.  
 It implements the interface of [afero](https://github.com/spf13/afero).
