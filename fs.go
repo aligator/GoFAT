@@ -70,7 +70,10 @@ func New(reader io.ReadSeeker) (*Fs, error) {
 	}
 
 	err := fs.initialize(false)
-	return fs, err
+	if err != nil {
+		return nil, err
+	}
+	return fs, nil
 }
 
 // NewSkipChecks opens a FAT filesystem from the given reader just like New but

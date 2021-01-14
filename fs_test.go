@@ -1,9 +1,11 @@
 package gofat
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -11,17 +13,62 @@ import (
 	"github.com/spf13/afero"
 )
 
+func fat32TestFileReader() io.ReadSeeker {
+	fsFile, err := os.Open("./testdata/fat32.img")
+	if err != nil {
+		fmt.Println("Make sure you ran go generate.")
+		panic(err)
+	}
+
+	return fsFile
+}
+
+func fat16TestFileReader() io.ReadSeeker {
+	fsFile, err := os.Open("./testdata/fat16.img")
+	if err != nil {
+		fmt.Println("Make sure you ran go generate.")
+		panic(err)
+	}
+
+	return fsFile
+}
+
 func TestNew(t *testing.T) {
 	type args struct {
 		reader io.ReadSeeker
 	}
 	tests := []struct {
-		name    string
-		args    args
-		want    *Fs
-		wantErr bool
+		name string
+		args args
+		// Do not expect something special. Should be enough to check for non-nil.
+		// Would not be that easy to provide a valid Fs to check with DeepEqual.
+		wantNotNil bool
+		wantErr    bool
 	}{
-		// TODO: Add test cases.
+		{
+			name: "FAT32 test image",
+			args: args{
+				reader: fat32TestFileReader(),
+			},
+			wantNotNil: true,
+			wantErr:    false,
+		},
+		{
+			name: "FAT16 test image",
+			args: args{
+				reader: fat16TestFileReader(),
+			},
+			wantNotNil: true,
+			wantErr:    false,
+		},
+		{
+			name: "no FAT file",
+			args: args{
+				reader: strings.NewReader("This is no FAT file"),
+			},
+			wantNotNil: false,
+			wantErr:    true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -30,8 +77,8 @@ func TestNew(t *testing.T) {
 				t.Errorf("New() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("New() = %v, want %v", got, tt.want)
+			if (got != nil) != tt.wantNotNil {
+				t.Errorf("New() = %v, wantNotNil %v", got, tt.wantNotNil)
 			}
 		})
 	}
