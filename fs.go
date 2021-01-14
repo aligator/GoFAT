@@ -85,6 +85,9 @@ func NewSkipChecks(reader io.ReadSeeker) (*Fs, error) {
 	}
 
 	err := fs.initialize(true)
+	if err != nil {
+		return nil, err
+	}
 	return fs, err
 }
 
