@@ -89,12 +89,36 @@ func TestNewSkipChecks(t *testing.T) {
 		reader io.ReadSeeker
 	}
 	tests := []struct {
-		name    string
-		args    args
-		want    *Fs
-		wantErr bool
+		name       string
+		args       args
+		wantNotNil bool
+		wantErr    bool
 	}{
-		// TODO: Add test cases.
+		// TODO: add test cases of images which should pass here but not in the TestNew
+		{
+			name: "FAT32 test image",
+			args: args{
+				reader: fat32TestFileReader(),
+			},
+			wantNotNil: true,
+			wantErr:    false,
+		},
+		{
+			name: "FAT16 test image",
+			args: args{
+				reader: fat16TestFileReader(),
+			},
+			wantNotNil: true,
+			wantErr:    false,
+		},
+		{
+			name: "no FAT file",
+			args: args{
+				reader: strings.NewReader("This is no FAT file"),
+			},
+			wantNotNil: false,
+			wantErr:    true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -103,8 +127,8 @@ func TestNewSkipChecks(t *testing.T) {
 				t.Errorf("NewSkipChecks() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("NewSkipChecks() = %v, want %v", got, tt.want)
+			if (got != nil) != tt.wantNotNil {
+				t.Errorf("New() = %v, wantNotNil %v", got, tt.wantNotNil)
 			}
 		})
 	}
@@ -116,7 +140,16 @@ func Test_fatEntry_Value(t *testing.T) {
 		e    fatEntry
 		want uint32
 	}{
-		// TODO: Add test cases.
+		{
+			name: "a value",
+			e:    42,
+			want: 42,
+		},
+		{
+			name: "zero",
+			e:    0,
+			want: 0,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -133,7 +166,21 @@ func Test_fatEntry_IsFree(t *testing.T) {
 		e    fatEntry
 		want bool
 	}{
-		// TODO: Add test cases.
+		{
+			name: "free",
+			e:    0x00000000,
+			want: true,
+		},
+		{
+			name: "not free",
+			e:    0x00000010,
+			want: false,
+		},
+		{
+			name: "free with msb set (special bits which should be ignored)",
+			e:    0xF0000000,
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
