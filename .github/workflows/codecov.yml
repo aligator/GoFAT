@@ -20,6 +20,7 @@ jobs:
 
       - name: Generate coverage report
         run: |
+          go generate
           go test `go list ./... | grep -v examples` -coverprofile=coverage.txt -covermode=atomic
 
       - name: Upload coverage report
