@@ -33,6 +33,16 @@ func fat16TestFileReader() io.ReadSeeker {
 	return fsFile
 }
 
+func fat32TooSmallTestFileReader() io.ReadSeeker {
+	fsFile, err := os.Open("./testdata/fat32-invalid-sectors-per-cluster.img")
+	if err != nil {
+		fmt.Println("Make sure you ran go generate.")
+		panic(err)
+	}
+
+	return fsFile
+}
+
 func TestNew(t *testing.T) {
 	type args struct {
 		reader io.ReadSeeker
@@ -69,6 +79,14 @@ func TestNew(t *testing.T) {
 			wantNotNil: false,
 			wantErr:    true,
 		},
+		{
+			name: "fat32 invalid sectors per cluster test image",
+			args: args{
+				reader: fat32TooSmallTestFileReader(),
+			},
+			wantNotNil: false,
+			wantErr:    true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -94,7 +112,6 @@ func TestNewSkipChecks(t *testing.T) {
 		wantNotNil bool
 		wantErr    bool
 	}{
-		// TODO: add test cases of images which should pass here but not in the TestNew
 		{
 			name: "FAT32 test image",
 			args: args{
@@ -118,6 +135,14 @@ func TestNewSkipChecks(t *testing.T) {
 			},
 			wantNotNil: false,
 			wantErr:    true,
+		},
+		{
+			name: "fat32 invalid sectors per cluster test image",
+			args: args{
+				reader: fat32TooSmallTestFileReader(),
+			},
+			wantNotNil: true,
+			wantErr:    false,
 		},
 	}
 	for _, tt := range tests {
