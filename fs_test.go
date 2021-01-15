@@ -202,7 +202,7 @@ func Test_fatEntry_IsFree(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "free with msb set (special bits which should be ignored)",
+			name: "free with most significant byte set (special bits which should be ignored)",
 			e:    0xF0000000,
 			want: true,
 		},
@@ -222,7 +222,21 @@ func Test_fatEntry_IsReservedTemp(t *testing.T) {
 		e    fatEntry
 		want bool
 	}{
-		// TODO: Add test cases.
+		{
+			name: "reserved tmp",
+			e:    0x00000001,
+			want: true,
+		},
+		{
+			name: "reserved tmp",
+			e:    0x00000010,
+			want: false,
+		},
+		{
+			name: "reserved tmp with most significant byte set (special bits which should be ignored)",
+			e:    0xF0000001,
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -239,7 +253,36 @@ func Test_fatEntry_IsNextCluster(t *testing.T) {
 		e    fatEntry
 		want bool
 	}{
-		// TODO: Add test cases.
+		{
+			name: "next cluster min",
+			e:    0x00000002,
+			want: true,
+		},
+		{
+			name: "next cluster max",
+			e:    0x0FFFFFEF,
+			want: true,
+		},
+		{
+			name: "any next cluster",
+			e:    0x000F0000,
+			want: true,
+		},
+		{
+			name: "higher than next cluster max",
+			e:    0x0FFFFFFF,
+			want: false,
+		},
+		{
+			name: "lower than next cluster nin",
+			e:    0x00000001,
+			want: false,
+		},
+		{
+			name: "any next cluster with most significant byte set (special bits which should be ignored)",
+			e:    0xF00F0002,
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -256,7 +299,36 @@ func Test_fatEntry_IsReservedSometimes(t *testing.T) {
 		e    fatEntry
 		want bool
 	}{
-		// TODO: Add test cases.
+		{
+			name: "reserved sometimes min",
+			e:    0x0FFFFFF0,
+			want: true,
+		},
+		{
+			name: "reserved sometimes max",
+			e:    0x0FFFFFF5,
+			want: true,
+		},
+		{
+			name: "any reserved sometimes",
+			e:    0x0FFFFFF3,
+			want: true,
+		},
+		{
+			name: "higher than reserved sometimes max",
+			e:    0x0FFFFFF6,
+			want: false,
+		},
+		{
+			name: "lower than reserved sometimes nin",
+			e:    0x0FFFFFEF,
+			want: false,
+		},
+		{
+			name: "any reserved sometimes with most significant byte set (special bits which should be ignored)",
+			e:    0xFFFFFFF3,
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -273,7 +345,26 @@ func Test_fatEntry_IsReserved(t *testing.T) {
 		e    fatEntry
 		want bool
 	}{
-		// TODO: Add test cases.
+		{
+			name: "reserved",
+			e:    0x0FFFFFF6,
+			want: true,
+		},
+		{
+			name: "less than reserved",
+			e:    0x0FFFFFF5,
+			want: false,
+		},
+		{
+			name: "more than reserved",
+			e:    0x0FFFFFF7,
+			want: false,
+		},
+		{
+			name: "reserved with most significant byte set (special bits which should be ignored)",
+			e:    0xFFFFFFF6,
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -290,7 +381,26 @@ func Test_fatEntry_IsBad(t *testing.T) {
 		e    fatEntry
 		want bool
 	}{
-		// TODO: Add test cases.
+		{
+			name: "bad",
+			e:    0x0FFFFFF7,
+			want: true,
+		},
+		{
+			name: "less than bad",
+			e:    0x0FFFFFF6,
+			want: false,
+		},
+		{
+			name: "more than bad",
+			e:    0x0FFFFFF8,
+			want: false,
+		},
+		{
+			name: "bad with most significant byte set (special bits which should be ignored)",
+			e:    0xFFFFFFF7,
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
