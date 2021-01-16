@@ -624,6 +624,7 @@ func (fs *Fs) store() error {
 }
 
 func (fs *Fs) Label() string {
+	// TODO: There may be a label entry in the root folder. Check how that should be handled.
 	return strings.TrimRight(fs.info.Label, " ")
 }
 
@@ -647,7 +648,7 @@ func (fs *Fs) Open(path string) (afero.File, error) {
 	path = filepath.ToSlash(path)
 
 	// For root just return a fake-file.
-	if path == "/" {
+	if path == "/" || path == "" {
 		fakeEntry := ExtendedEntryHeader{
 			EntryHeader: EntryHeader{
 				Name:      [11]byte{' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '},

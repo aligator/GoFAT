@@ -3,11 +3,13 @@ package gofat
 import (
 	"fmt"
 	"io"
+	"math/rand"
 	"os"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
+	"testing/quick"
 	"time"
 
 	"github.com/spf13/afero"
@@ -185,6 +187,7 @@ func Test_fatEntry_Value(t *testing.T) {
 	}
 }
 
+// fatEntryTests contains the data for a fatEntry test case.
 type fatEntryTests struct {
 	name  string
 	eFrom fatEntry
@@ -192,13 +195,53 @@ type fatEntryTests struct {
 	want  bool
 }
 
+// testFatEntry executes the fatEntryTests using the given tests and execution method.
+// It utilizes testing/quick to fuzz values in between of eFrom and eTo. The edge-values are always tested.
 func testFatEntry(t *testing.T, tests []fatEntryTests, method string, execute func(e fatEntry) bool) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			for e := tt.eFrom; e <= tt.eTo; e++ {
-				if got := execute(e); got != tt.want {
-					t.Errorf("fatEntry(0x%x).%v() = %v, want %v", e, method, got, tt.want)
-				}
+			// First test the edge cases.
+			if got := execute(tt.eFrom); got != tt.want {
+				t.Errorf("fatEntry(0x%x).%v() = %v, want %v", tt.eFrom, method, got, tt.want)
+			}
+			if got := execute(tt.eTo); got != tt.want {
+				t.Errorf("fatEntry(0x%x).%v() = %v, want %v", tt.eTo, method, got, tt.want)
+			}
+		})
+
+		// If the values are too near, random tests make no sense.
+		if tt.eFrom == tt.eTo || tt.eTo-tt.eFrom <= 2 {
+			return
+		}
+
+		t.Run("Random: "+tt.name, func(t *testing.T) {
+			// Then test some values in between using random values.
+
+			// maxCount is either eTo - eFrom or 10 if too big.
+			// That way only max 100 values get tested.
+			// This applies only to the default value of "-quickchecks".
+			// If a higher value than "-quickchecks 100" is used,
+			// more values than maxCount may be tested.
+			maxCount := int(tt.eTo - tt.eFrom)
+			if maxCount > 100 {
+				maxCount = 100
+			}
+
+			// Utilize quick.Check to randomize the test.
+			if err := quick.Check(func(entry fatEntry) bool {
+				return tt.want == execute(entry)
+			}, &quick.Config{
+				MaxCountScale: float64(maxCount) / 100,
+				Values: func(values []reflect.Value, rand *rand.Rand) {
+					// Generate a random fatEntry in the current value range.
+					var min = int(tt.eFrom + 1)
+					var max = int(tt.eTo)
+					for i := range values {
+						values[i] = reflect.ValueOf(fatEntry(uint32(rand.Intn(max-min) + min)))
+					}
+				},
+			}); err != nil {
+				t.Errorf("fatEntry(RANDOM_VALUE).%v() failed:\n%v", method, err)
 			}
 		})
 	}
@@ -519,7 +562,15 @@ func TestFs_Label(t *testing.T) {
 		fields fields
 		want   string
 	}{
-		// TODO: Add test cases.
+		{
+			name: "a simple label",
+			fields: fields{
+				info: Info{
+					Label: "A super label",
+				},
+			},
+			want: "A super label",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -548,7 +599,33 @@ func TestFs_FSType(t *testing.T) {
 		fields fields
 		want   FATType
 	}{
-		// TODO: Add test cases.
+		{
+			name: "FAT12",
+			fields: fields{
+				info: Info{
+					FSType: FAT12,
+				},
+			},
+			want: FAT12,
+		},
+		{
+			name: "FAT16",
+			fields: fields{
+				info: Info{
+					FSType: FAT16,
+				},
+			},
+			want: FAT16,
+		},
+		{
+			name: "FAT32",
+			fields: fields{
+				info: Info{
+					FSType: FAT32,
+				},
+			},
+			want: FAT32,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
