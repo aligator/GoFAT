@@ -185,281 +185,326 @@ func Test_fatEntry_Value(t *testing.T) {
 	}
 }
 
-func Test_fatEntry_IsFree(t *testing.T) {
-	tests := []struct {
-		name string
-		e    fatEntry
-		want bool
-	}{
-		{
-			name: "free",
-			e:    0x00000000,
-			want: true,
-		},
-		{
-			name: "not free",
-			e:    0x00000010,
-			want: false,
-		},
-		{
-			name: "free with most significant byte set (special bits which should be ignored)",
-			e:    0xF0000000,
-			want: true,
-		},
-	}
+type fatEntryTests struct {
+	name  string
+	eFrom fatEntry
+	eTo   fatEntry
+	want  bool
+}
+
+func testFatEntry(t *testing.T, tests []fatEntryTests, method string, execute func(e fatEntry) bool) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.e.IsFree(); got != tt.want {
-				t.Errorf("fatEntry.IsFree() = %v, want %v", got, tt.want)
+			for e := tt.eFrom; e <= tt.eTo; e++ {
+				if got := execute(e); got != tt.want {
+					t.Errorf("fatEntry(0x%x).%v() = %v, want %v", e, method, got, tt.want)
+				}
 			}
 		})
 	}
+}
+
+func Test_fatEntry_IsFree(t *testing.T) {
+	testFatEntry(t, []fatEntryTests{
+		{
+			name:  "IsFree",
+			eFrom: 0x00000000,
+			eTo:   0x00000000,
+			want:  true,
+		},
+		{
+			name:  "not IsFree",
+			eFrom: 0x00000001,
+			eTo:   0x0FFFFFFF,
+			want:  false,
+		},
+		{
+			name:  "IsFree with most significant byte set (special bits which should be ignored)",
+			eFrom: 0xF0000000,
+			eTo:   0xF0000000,
+			want:  true,
+		},
+	}, "IsFree", func(e fatEntry) bool {
+		return e.IsFree()
+	})
 }
 
 func Test_fatEntry_IsReservedTemp(t *testing.T) {
-	tests := []struct {
-		name string
-		e    fatEntry
-		want bool
-	}{
+	testFatEntry(t, []fatEntryTests{
 		{
-			name: "reserved tmp",
-			e:    0x00000001,
-			want: true,
+			name:  "IsReservedTemp",
+			eFrom: 0x00000001,
+			eTo:   0x00000001,
+			want:  true,
 		},
 		{
-			name: "reserved tmp",
-			e:    0x00000010,
-			want: false,
+			name:  "higher than IsReservedTemp",
+			eFrom: 0x00000002,
+			eTo:   0x0FFFFFFF,
+			want:  false,
 		},
 		{
-			name: "reserved tmp with most significant byte set (special bits which should be ignored)",
-			e:    0xF0000001,
-			want: true,
+			name:  "lower than IsReservedTemp",
+			eFrom: 0x00000000,
+			eTo:   0x00000000,
+			want:  false,
 		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.e.IsReservedTemp(); got != tt.want {
-				t.Errorf("fatEntry.IsReservedTemp() = %v, want %v", got, tt.want)
-			}
-		})
-	}
+		{
+			name:  "IsReservedTemp with most significant byte set (special bits which should be ignored)",
+			eFrom: 0xF0000001,
+			eTo:   0xF0000001,
+			want:  true,
+		},
+	}, "IsReservedTemp", func(e fatEntry) bool {
+		return e.IsReservedTemp()
+	})
 }
 
 func Test_fatEntry_IsNextCluster(t *testing.T) {
-	tests := []struct {
-		name string
-		e    fatEntry
-		want bool
-	}{
+	testFatEntry(t, []fatEntryTests{
 		{
-			name: "next cluster min",
-			e:    0x00000002,
-			want: true,
+			name:  "IsNextCluster",
+			eFrom: 0x00000002,
+			eTo:   0x0FFFFFEF,
+			want:  true,
 		},
 		{
-			name: "next cluster max",
-			e:    0x0FFFFFEF,
-			want: true,
+			name:  "higher than IsNextCluster",
+			eFrom: 0x0FFFFFF0,
+			eTo:   0x0FFFFFFF,
+			want:  false,
 		},
 		{
-			name: "any next cluster",
-			e:    0x000F0000,
-			want: true,
+			name:  "lower than IsNextCluster",
+			eFrom: 0x00000000,
+			eTo:   0x00000001,
+			want:  false,
 		},
 		{
-			name: "higher than next cluster max",
-			e:    0x0FFFFFFF,
-			want: false,
+			name:  "IsNextCluster with most significant byte set (special bits which should be ignored)",
+			eFrom: 0xF0000002,
+			eTo:   0xF0000002,
+			want:  true,
 		},
-		{
-			name: "lower than next cluster nin",
-			e:    0x00000001,
-			want: false,
-		},
-		{
-			name: "any next cluster with most significant byte set (special bits which should be ignored)",
-			e:    0xF00F0002,
-			want: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.e.IsNextCluster(); got != tt.want {
-				t.Errorf("fatEntry.IsNextCluster() = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	}, "IsNextCluster", func(e fatEntry) bool {
+		return e.IsNextCluster()
+	})
 }
 
 func Test_fatEntry_IsReservedSometimes(t *testing.T) {
-	tests := []struct {
-		name string
-		e    fatEntry
-		want bool
-	}{
+	testFatEntry(t, []fatEntryTests{
 		{
-			name: "reserved sometimes min",
-			e:    0x0FFFFFF0,
-			want: true,
+			name:  "IsReservedSometimes",
+			eFrom: 0x0FFFFFF0,
+			eTo:   0x0FFFFFF5,
+			want:  true,
 		},
 		{
-			name: "reserved sometimes max",
-			e:    0x0FFFFFF5,
-			want: true,
+			name:  "higher than IsReservedSometimes",
+			eFrom: 0x0FFFFFF6,
+			eTo:   0x0FFFFFFF,
+			want:  false,
 		},
 		{
-			name: "any reserved sometimes",
-			e:    0x0FFFFFF3,
-			want: true,
+			name:  "lower than IsReservedSometimes",
+			eFrom: 0x00000000,
+			eTo:   0x0FFFFFEF,
+			want:  false,
 		},
 		{
-			name: "higher than reserved sometimes max",
-			e:    0x0FFFFFF6,
-			want: false,
+			name:  "IsReservedSometimes with most significant byte set (special bits which should be ignored)",
+			eFrom: 0xFFFFFFF0,
+			eTo:   0xFFFFFFF0,
+			want:  true,
 		},
-		{
-			name: "lower than reserved sometimes nin",
-			e:    0x0FFFFFEF,
-			want: false,
-		},
-		{
-			name: "any reserved sometimes with most significant byte set (special bits which should be ignored)",
-			e:    0xFFFFFFF3,
-			want: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.e.IsReservedSometimes(); got != tt.want {
-				t.Errorf("fatEntry.IsReservedSometimes() = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	}, "IsReservedSometimes", func(e fatEntry) bool {
+		return e.IsReservedSometimes()
+	})
 }
 
 func Test_fatEntry_IsReserved(t *testing.T) {
-	tests := []struct {
-		name string
-		e    fatEntry
-		want bool
-	}{
+	testFatEntry(t, []fatEntryTests{
 		{
-			name: "reserved",
-			e:    0x0FFFFFF6,
-			want: true,
+			name:  "IsReserved",
+			eFrom: 0x0FFFFFF6,
+			eTo:   0x0FFFFFF6,
+			want:  true,
 		},
 		{
-			name: "less than reserved",
-			e:    0x0FFFFFF5,
-			want: false,
+			name:  "higher than IsReserved",
+			eFrom: 0x0FFFFFF7,
+			eTo:   0x0FFFFFFF,
+			want:  false,
 		},
 		{
-			name: "more than reserved",
-			e:    0x0FFFFFF7,
-			want: false,
+			name:  "lower than IsReserved",
+			eFrom: 0x00000000,
+			eTo:   0x0FFFFFF5,
+			want:  false,
 		},
 		{
-			name: "reserved with most significant byte set (special bits which should be ignored)",
-			e:    0xFFFFFFF6,
-			want: true,
+			name:  "IsReserved with most significant byte set (special bits which should be ignored)",
+			eFrom: 0xFFFFFFF6,
+			eTo:   0xFFFFFFF6,
+			want:  true,
 		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.e.IsReserved(); got != tt.want {
-				t.Errorf("fatEntry.IsReserved() = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	}, "IsReserved", func(e fatEntry) bool {
+		return e.IsReserved()
+	})
 }
 
 func Test_fatEntry_IsBad(t *testing.T) {
-	tests := []struct {
-		name string
-		e    fatEntry
-		want bool
-	}{
+	testFatEntry(t, []fatEntryTests{
 		{
-			name: "bad",
-			e:    0x0FFFFFF7,
-			want: true,
+			name:  "IsBad",
+			eFrom: 0x0FFFFFF7,
+			eTo:   0x0FFFFFF7,
+			want:  true,
 		},
 		{
-			name: "less than bad",
-			e:    0x0FFFFFF6,
-			want: false,
+			name:  "higher than IsBad",
+			eFrom: 0x0FFFFFF8,
+			eTo:   0x0FFFFFFF,
+			want:  false,
 		},
 		{
-			name: "more than bad",
-			e:    0x0FFFFFF8,
-			want: false,
+			name:  "lower than IsBad",
+			eFrom: 0x00000000,
+			eTo:   0x0FFFFFF6,
+			want:  false,
 		},
 		{
-			name: "bad with most significant byte set (special bits which should be ignored)",
-			e:    0xFFFFFFF7,
-			want: true,
+			name:  "IsBad with most significant byte set (special bits which should be ignored)",
+			eFrom: 0xFFFFFFF7,
+			eTo:   0xFFFFFFF7,
+			want:  true,
 		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.e.IsBad(); got != tt.want {
-				t.Errorf("fatEntry.IsBad() = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	}, "IsBad", func(e fatEntry) bool {
+		return e.IsBad()
+	})
 }
 
 func Test_fatEntry_IsEOF(t *testing.T) {
-	tests := []struct {
-		name string
-		e    fatEntry
-		want bool
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.e.IsEOF(); got != tt.want {
-				t.Errorf("fatEntry.IsEOF() = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	testFatEntry(t, []fatEntryTests{
+		{
+			name:  "IsEOF",
+			eFrom: 0x0FFFFFF8,
+			eTo:   0x0FFFFFFF,
+			want:  true,
+		},
+		{
+			name:  "lower than IsEOF",
+			eFrom: 0x00000000,
+			eTo:   0x0FFFFFF7,
+			want:  false,
+		},
+		{
+			name:  "IsEOF with most significant byte set (special bits which should be ignored)",
+			eFrom: 0xFFFFFFF8,
+			eTo:   0xFFFFFFF8,
+			want:  true,
+		},
+	}, "IsEOF", func(e fatEntry) bool {
+		return e.IsEOF()
+	})
 }
 
 func Test_fatEntry_ReadAsNextCluster(t *testing.T) {
-	tests := []struct {
-		name string
-		e    fatEntry
-		want bool
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.e.ReadAsNextCluster(); got != tt.want {
-				t.Errorf("fatEntry.ReadAsNextCluster() = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	testFatEntry(t, []fatEntryTests{
+		{
+			name:  "IsFree",
+			eFrom: 0x00000000,
+			eTo:   0x00000000,
+			want:  false,
+		},
+		{
+			name:  "IsReservedTemp",
+			eFrom: 0x00000001,
+			eTo:   0x00000001,
+			want:  false,
+		},
+		{
+			name:  "IsNextCluster",
+			eFrom: 0x00000002,
+			eTo:   0x0FFFFFEF,
+			want:  true,
+		},
+		{
+			name:  "IsReservedSometimes",
+			eFrom: 0x0FFFFFF0,
+			eTo:   0x0FFFFFF5,
+			want:  true,
+		},
+		{
+			name:  "IsReserved",
+			eFrom: 0x0FFFFFF6,
+			eTo:   0x0FFFFFF6,
+			want:  true,
+		},
+		{
+			name:  "IsBad",
+			eFrom: 0x0FFFFFF7,
+			eTo:   0x0FFFFFF7,
+			want:  true,
+		},
+		{
+			name:  "IsEOF",
+			eFrom: 0x0FFFFFF8,
+			eTo:   0x0FFFFFFF,
+			want:  false,
+		},
+	}, "ReadAsNextCluster", func(e fatEntry) bool {
+		return e.ReadAsNextCluster()
+	})
 }
 
 func Test_fatEntry_ReadAsEOF(t *testing.T) {
-	tests := []struct {
-		name string
-		e    fatEntry
-		want bool
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.e.ReadAsEOF(); got != tt.want {
-				t.Errorf("fatEntry.ReadAsEOF() = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	testFatEntry(t, []fatEntryTests{
+		{
+			name:  "IsFree",
+			eFrom: 0x00000000,
+			eTo:   0x00000000,
+			want:  false,
+		},
+		{
+			name:  "IsReservedTemp",
+			eFrom: 0x00000001,
+			eTo:   0x00000001,
+			want:  true,
+		},
+		{
+			name:  "IsNextCluster",
+			eFrom: 0x00000002,
+			eTo:   0x0FFFFFEF,
+			want:  false,
+		},
+		{
+			name:  "IsReservedSometimes",
+			eFrom: 0x0FFFFFF0,
+			eTo:   0x0FFFFFF5,
+			want:  false,
+		},
+		{
+			name:  "IsReserved",
+			eFrom: 0x0FFFFFF6,
+			eTo:   0x0FFFFFF6,
+			want:  false,
+		},
+		{
+			name:  "IsBad",
+			eFrom: 0x0FFFFFF7,
+			eTo:   0x0FFFFFF7,
+			want:  false,
+		},
+		{
+			name:  "IsEOF",
+			eFrom: 0x0FFFFFF8,
+			eTo:   0x0FFFFFFF,
+			want:  true,
+		},
+	}, "ReadAsEOF", func(e fatEntry) bool {
+		return e.ReadAsEOF()
+	})
 }
 
 func TestFs_Label(t *testing.T) {
