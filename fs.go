@@ -647,8 +647,12 @@ func (fs *Fs) MkdirAll(path string, perm os.FileMode) error {
 func (fs *Fs) Open(path string) (afero.File, error) {
 	path = filepath.ToSlash(path)
 
+	if path == "" {
+		path = "/"
+	}
+
 	// For root just return a fake-file.
-	if path == "/" || path == "" {
+	if path == "/" {
 		fakeEntry := ExtendedEntryHeader{
 			EntryHeader: EntryHeader{
 				Name:      [11]byte{' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '},

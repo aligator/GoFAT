@@ -15,6 +15,8 @@ import (
 	"github.com/spf13/afero"
 )
 
+const testFolderInImages = "DoNotEdit_tests"
+
 func fat32TestFileReader() io.ReadSeeker {
 	fsFile, err := os.Open("./testdata/fat32.img")
 	if err != nil {
@@ -43,6 +45,15 @@ func fat32TooSmallTestFileReader() io.ReadSeeker {
 	}
 
 	return fsFile
+}
+
+func MustNew(t testing.TB, reader io.ReadSeeker) *Fs {
+	fs, err := New(reader)
+	if err != nil {
+		t.Error(err)
+	}
+
+	return fs
 }
 
 func TestNew(t *testing.T) {
@@ -750,35 +761,118 @@ func TestFs_MkdirAll(t *testing.T) {
 }
 
 func TestFs_Open(t *testing.T) {
-	type fields struct {
-		lock        sync.Mutex
-		reader      io.ReadSeeker
-		info        Info
-		sectorCache Sector
+	fakeRootEntry := ExtendedEntryHeader{
+		EntryHeader: EntryHeader{
+			Name:      [11]byte{' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '},
+			Attribute: AttrDirectory,
+		},
 	}
+	fakeRootFile := File{
+		path:        "/",
+		isDirectory: true,
+		stat:        fakeRootEntry.FileInfo(),
+	}
+
+	fakeFolderEntry := ExtendedEntryHeader{
+		ExtendedName: "DoNotEdit_tests",
+		EntryHeader: EntryHeader{
+			Name:            [11]byte{68, 79, 78, 79, 84, 69, 126, 49, 32, 32, 32},
+			Attribute:       AttrDirectory,
+			NTReserved:      0,
+			CreateTimeTenth: 157,
+			CreateTime:      45984,
+			CreateDate:      21034,
+			LastAccessDate:  21034,
+			FirstClusterHI:  0,
+			WriteTime:       45984,
+			WriteDate:       21034,
+			FirstClusterLO:  52,
+			FileSize:        0,
+		},
+	}
+	fakeFolderFile := File{
+		fs:           nil,
+		path:         "DoNotEdit_tests",
+		isDirectory:  true,
+		isReadOnly:   false,
+		isHidden:     false,
+		isSystem:     false,
+		firstCluster: 52,
+		stat:         fakeFolderEntry.FileInfo(),
+		offset:       0,
+	}
+
 	type args struct {
 		path string
 	}
 	tests := []struct {
 		name    string
-		fields  fields
+		fs      *Fs
 		args    args
-		want    afero.File
+		want    *File
 		wantErr bool
 	}{
-		// TODO: Add test cases.
+		{
+			name: "root with ''",
+			fs:   MustNew(t, fat32TestFileReader()),
+			args: args{
+				path: "",
+			},
+			want:    &fakeRootFile,
+			wantErr: false,
+		},
+		{
+			name: "root with '/'",
+			fs:   MustNew(t, fat32TestFileReader()),
+			args: args{
+				path: "/",
+			},
+			want:    &fakeRootFile,
+			wantErr: false,
+		},
+		{
+			name: "folder",
+			fs:   MustNew(t, fat32TestFileReader()),
+			args: args{
+				path: testFolderInImages,
+			},
+			want:    &fakeFolderFile,
+			wantErr: false,
+		},
+		{
+			name: "not existing folder",
+			fs:   MustNew(t, fat32TestFileReader()),
+			args: args{
+				path: "/non-existing-folder",
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "not a folder",
+			fs:   MustNew(t, fat32TestFileReader()),
+			args: args{
+				path: "/non-existing-folder/HelloWorldThisIsALoongFileName.txt",
+			},
+			want:    nil,
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fs := &Fs{
-				lock:        tt.fields.lock,
-				reader:      tt.fields.reader,
-				info:        tt.fields.info,
-				sectorCache: tt.fields.sectorCache,
+			// Set the fs.
+			if tt.want != nil {
+				tt.want.fs = tt.fs
 			}
-			got, err := fs.Open(tt.args.path)
+
+			got, err := tt.fs.Open(tt.args.path)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Fs.Open() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.want == nil && got == nil {
+				// Deep equal seems to not work with nil here.
 				return
 			}
 			if !reflect.DeepEqual(got, tt.want) {
