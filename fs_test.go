@@ -47,7 +47,7 @@ func fat32TooSmallTestFileReader() io.ReadSeeker {
 	return fsFile
 }
 
-func MustNew(t testing.TB, reader io.ReadSeeker) *Fs {
+func testingNew(t testing.TB, reader io.ReadSeeker) *Fs {
 	fs, err := New(reader)
 	if err != nil {
 		t.Error(err)
@@ -779,13 +779,13 @@ func TestFs_Open(t *testing.T) {
 			Name:            [11]byte{68, 79, 78, 79, 84, 69, 126, 49, 32, 32, 32},
 			Attribute:       AttrDirectory,
 			NTReserved:      0,
-			CreateTimeTenth: 157,
-			CreateTime:      45984,
-			CreateDate:      21034,
+			CreateTimeTenth: 122,
+			CreateTime:      39428,
+			CreateDate:      21043,
 			LastAccessDate:  21034,
 			FirstClusterHI:  0,
-			WriteTime:       45984,
-			WriteDate:       21034,
+			WriteTime:       39428,
+			WriteDate:       21043,
 			FirstClusterLO:  52,
 			FileSize:        0,
 		},
@@ -814,7 +814,7 @@ func TestFs_Open(t *testing.T) {
 	}{
 		{
 			name: "root with ''",
-			fs:   MustNew(t, fat32TestFileReader()),
+			fs:   testingNew(t, fat32TestFileReader()),
 			args: args{
 				path: "",
 			},
@@ -823,7 +823,7 @@ func TestFs_Open(t *testing.T) {
 		},
 		{
 			name: "root with '/'",
-			fs:   MustNew(t, fat32TestFileReader()),
+			fs:   testingNew(t, fat32TestFileReader()),
 			args: args{
 				path: "/",
 			},
@@ -832,7 +832,7 @@ func TestFs_Open(t *testing.T) {
 		},
 		{
 			name: "folder",
-			fs:   MustNew(t, fat32TestFileReader()),
+			fs:   testingNew(t, fat32TestFileReader()),
 			args: args{
 				path: testFolderInImages,
 			},
@@ -841,7 +841,7 @@ func TestFs_Open(t *testing.T) {
 		},
 		{
 			name: "not existing folder",
-			fs:   MustNew(t, fat32TestFileReader()),
+			fs:   testingNew(t, fat32TestFileReader()),
 			args: args{
 				path: "/non-existing-folder",
 			},
@@ -850,7 +850,7 @@ func TestFs_Open(t *testing.T) {
 		},
 		{
 			name: "not a folder",
-			fs:   MustNew(t, fat32TestFileReader()),
+			fs:   testingNew(t, fat32TestFileReader()),
 			args: args{
 				path: "/non-existing-folder/HelloWorldThisIsALoongFileName.txt",
 			},
@@ -1024,66 +1024,23 @@ func TestFs_Rename(t *testing.T) {
 }
 
 func TestFs_Stat(t *testing.T) {
-	type fields struct {
-		lock        sync.Mutex
-		reader      io.ReadSeeker
-		info        Info
-		sectorCache Sector
-	}
-	type args struct {
-		path string
-	}
-	tests := []struct {
-		name    string
-		fields  fields
-		args    args
-		want    os.FileInfo
-		wantErr bool
-	}{
-		// TODO: Add test cases.
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			fs := &Fs{
-				lock:        tt.fields.lock,
-				reader:      tt.fields.reader,
-				info:        tt.fields.info,
-				sectorCache: tt.fields.sectorCache,
-			}
-			got, err := fs.Stat(tt.args.path)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Fs.Stat() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("Fs.Stat() = %v, want %v", got, tt.want)
-			}
-		})
-	}
+	// Not needed for now as it just opens a file and cals Stat on it.
+	// So it's mostly tested already.
 }
 
 func TestFs_Name(t *testing.T) {
-	type fields struct {
-		lock        sync.Mutex
-		reader      io.ReadSeeker
-		info        Info
-		sectorCache Sector
-	}
 	tests := []struct {
-		name   string
-		fields fields
-		want   string
+		name string
+		want string
 	}{
-		// TODO: Add test cases.
+		{
+			name: "has to be 'FAT'",
+			want: "FAT",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fs := &Fs{
-				lock:        tt.fields.lock,
-				reader:      tt.fields.reader,
-				info:        tt.fields.info,
-				sectorCache: tt.fields.sectorCache,
-			}
+			fs := &Fs{}
 			if got := fs.Name(); got != tt.want {
 				t.Errorf("Fs.Name() = %v, want %v", got, tt.want)
 			}
@@ -1190,6 +1147,69 @@ func TestFs_Chtimes(t *testing.T) {
 			}
 			if err := fs.Chtimes(tt.args.name, tt.args.atime, tt.args.mtime); (err != nil) != tt.wantErr {
 				t.Errorf("Fs.Chtimes() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestFs_readFile(t *testing.T) {
+	type args struct {
+		cluster fatEntry
+		offset  int64
+		size    int
+	}
+	tests := []struct {
+		name    string
+		fs      *Fs
+		args    args
+		want    []byte
+		wantErr error
+	}{
+		{
+			name: "Read a file",
+			fs:   testingNew(t, fat32TestFileReader()),
+			args: args{
+				cluster: 53,
+				offset:  0,
+				size:    0,
+			},
+			want:    append([]byte("## GoFAT\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nAhis is an example FAT32 volume used to test GoFAT.\nBhis is an example FAT32 volume used to test GoFAT.\nChis is an example FAT32 volume used to test GoFAT.\nDhis is an example FAT32 volume used to test GoFAT.\nEhis is an example FAT32 volume used to test GoFAT.\nFhis is an example FAT32 volume used to test GoFAT.\nGhis is an example FAT32 volume used to test GoFAT.\nHhis is an example FAT32 volume used to test GoFAT.\nIhis is an example FAT32 volume used to test GoFAT.\nJhis is an example FAT32 volume used to test GoFAT.\nKhis is an example FAT32 volume used to test GoFAT.\nLhis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nAhis is an example FAT32 volume used to test GoFAT.\nBhis is an example FAT32 volume used to test GoFAT.\nChis is an example FAT32 volume used to test GoFAT.\nDhis is an example FAT32 volume used to test GoFAT.\nEhis is an example FAT32 volume used to test GoFAT.\nFhis is an example FAT32 volume used to test GoFAT.\nGhis is an example FAT32 volume used to test GoFAT.\nHhis is an example FAT32 volume used to test GoFAT.\nIhis is an example FAT32 volume used to test GoFAT.\nJhis is an example FAT32 volume used to test GoFAT.\nKhis is an example FAT32 volume used to test GoFAT.\nLhis is an example FAT32 volume used to test GoFAT.\n"), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+			wantErr: nil,
+		},
+		{
+			name: "Read subset of a file",
+			fs:   testingNew(t, fat32TestFileReader()),
+			args: args{
+				cluster: 53,
+				offset:  0,
+				size:    20,
+			},
+			want:    []byte("## GoFAT\nThis is an "),
+			wantErr: nil,
+		},
+		{
+			name: "Read subset in the middle of a file",
+			fs:   testingNew(t, fat32TestFileReader()),
+			args: args{
+				cluster: 53,
+				offset:  10357,
+				size:    52,
+			},
+			want:    []byte("Jhis is an example FAT32 volume used to test GoFAT.\n"),
+			wantErr: nil,
+		},
+		// TODO: add some tests with a broken file?
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fs := tt.fs
+			got, err := fs.readFileAt(tt.args.cluster, tt.args.offset, tt.args.size)
+			if err != tt.wantErr {
+				t.Errorf("readFileAt() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("readFileAt() got = %v, want %v", got, tt.want)
 			}
 		})
 	}

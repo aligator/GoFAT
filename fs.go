@@ -722,7 +722,8 @@ pathLoop:
 }
 
 func (fs *Fs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
-	panic("implement me")
+	// TODO: implement flag and perm
+	return fs.Open(name)
 }
 
 func (fs *Fs) Remove(name string) error {
