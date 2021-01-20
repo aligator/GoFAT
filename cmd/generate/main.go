@@ -9,6 +9,7 @@ import (
 	"strings"
 )
 
+// main for extracting the test images. Can be executed using 'go generate' from the project root.
 func main() {
 	src := "testdata/testdata.zip"
 	dest := "testdata"

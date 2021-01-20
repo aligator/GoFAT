@@ -10,8 +10,10 @@ import (
 
 // fatFileFs provides all methods needed from a fat filesystem for File.
 // It mainly exists to be able to mock the Fs in tests.
+// Generated mock using mockgen:
+//  mockgen -source=file.go -destination=file_mock.go -package gofat
 type fatFileFs interface {
-	readFileAt(cluster fatEntry, offset int64, size int) ([]byte, error)
+	readFileAt(cluster fatEntry, fileSize int64, offset int64, readSize int64) ([]byte, error)
 	readRoot() ([]ExtendedEntryHeader, error)
 	readDir(cluster fatEntry) ([]ExtendedEntryHeader, error)
 }
@@ -45,7 +47,7 @@ func (f *File) Close() error {
 }
 
 func (f *File) Read(p []byte) (n int, err error) {
-	data, err := f.fs.readFileAt(f.firstCluster, f.offset, len(p))
+	data, err := f.fs.readFileAt(f.firstCluster, f.stat.Size(), f.offset, int64(len(p)))
 	if err != nil {
 		return len(data), err
 	}
@@ -59,7 +61,7 @@ func (f *File) Read(p []byte) (n int, err error) {
 
 func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
 	size := len(p)
-	data, err := f.fs.readFileAt(f.firstCluster, off, size)
+	data, err := f.fs.readFileAt(f.firstCluster, f.stat.Size(), off, int64(size))
 	if err != nil {
 		return len(data), err
 	}

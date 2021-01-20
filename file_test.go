@@ -29,10 +29,11 @@ type fileTestFields struct {
 // someData to have something to check equality.
 type fakeFileInfo struct {
 	someData string
+	fileSize int64
 }
 
 func (f fakeFileInfo) Name() string       { return "" }
-func (f fakeFileInfo) Size() int64        { return 0 }
+func (f fakeFileInfo) Size() int64        { return f.fileSize }
 func (f fakeFileInfo) Mode() os.FileMode  { return 0 }
 func (f fakeFileInfo) ModTime() time.Time { return time.Time{} }
 func (f fakeFileInfo) IsDir() bool        { return false }
@@ -112,6 +113,7 @@ func TestFile_Read(t *testing.T) {
 			},
 			fields: fileTestFields{
 				firstCluster: 0,
+				stat:         fakeFileInfo{fileSize: 11},
 			},
 			args: args{
 				p: make([]byte, 11),
@@ -128,6 +130,7 @@ func TestFile_Read(t *testing.T) {
 			fields: fileTestFields{
 				firstCluster: 0,
 				offset:       5,
+				stat:         fakeFileInfo{fileSize: 11},
 			},
 			args: args{
 				p: make([]byte, 6),
@@ -143,6 +146,7 @@ func TestFile_Read(t *testing.T) {
 			},
 			fields: fileTestFields{
 				firstCluster: 0,
+				stat:         fakeFileInfo{fileSize: 11},
 			},
 			args: args{
 				p: make([]byte, 11),
@@ -158,6 +162,7 @@ func TestFile_Read(t *testing.T) {
 			},
 			fields: fileTestFields{
 				firstCluster: 0,
+				stat:         fakeFileInfo{fileSize: 11},
 			},
 			args: args{
 				p: make([]byte, 20),
@@ -171,7 +176,7 @@ func TestFile_Read(t *testing.T) {
 			mockCtrl := gomock.NewController(t)
 			mockFs := NewMockfatFileFs(mockCtrl)
 			mockFs.EXPECT().
-				readFileAt(tt.fields.firstCluster, tt.fields.offset, len(tt.args.p)).
+				readFileAt(tt.fields.firstCluster, tt.fields.stat.Size(), tt.fields.offset, int64(len(tt.args.p))).
 				MaxTimes(1).
 				Return(tt.mockData.readAtResult, tt.mockData.readAtError)
 
@@ -227,6 +232,7 @@ func TestFile_ReadAt(t *testing.T) {
 			},
 			fields: fileTestFields{
 				firstCluster: 0,
+				stat:         fakeFileInfo{fileSize: 11},
 			},
 			args: args{
 				p:   make([]byte, 10),
@@ -243,6 +249,7 @@ func TestFile_ReadAt(t *testing.T) {
 			},
 			fields: fileTestFields{
 				firstCluster: 0,
+				stat:         fakeFileInfo{fileSize: 11},
 			},
 			args: args{
 				p:   make([]byte, 11),
@@ -259,6 +266,7 @@ func TestFile_ReadAt(t *testing.T) {
 			},
 			fields: fileTestFields{
 				firstCluster: 0,
+				stat:         fakeFileInfo{fileSize: 11},
 			},
 			args: args{
 				p:   make([]byte, 10),
@@ -273,7 +281,7 @@ func TestFile_ReadAt(t *testing.T) {
 			mockCtrl := gomock.NewController(t)
 			mockFs := NewMockfatFileFs(mockCtrl)
 			mockFs.EXPECT().
-				readFileAt(tt.fields.firstCluster, tt.args.off, len(tt.args.p)).
+				readFileAt(tt.fields.firstCluster, tt.fields.stat.Size(), tt.args.off, int64(len(tt.args.p))).
 				MaxTimes(1).
 				Return(tt.mockData.readAtResult, tt.mockData.readAtError)
 

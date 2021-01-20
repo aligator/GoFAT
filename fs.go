@@ -94,10 +94,40 @@ func NewSkipChecks(reader io.ReadSeeker) (*Fs, error) {
 // readFileAt reads a file which starts at the given cluster but it skips
 // the first bytes so that is starts reading at the given offset.
 // It only returns max the requested amount of bytes.
-// If size is <= 0 it returns the whole file.
-// If size is > filesize it also just returns the whole file.
-func (fs *Fs) readFileAt(cluster fatEntry, offset int64, size int) ([]byte, error) {
+// A fileSize of < 0 indicates that it is unknown and therefore it reads until the end of the last sector.
+// If readSize is <= 0 it returns the whole file.
+// If readSize is > fileSize it also just returns the whole file but also io.EOF as error.
+// If an error occurs all bytes read until then and the error is returned. io.EOF is ignored in that case.
+func (fs *Fs) readFileAt(cluster fatEntry, fileSize int64, offset int64, readSize int64) ([]byte, error) {
+	// finalize returns the data sliced to either the readSize, the fileSize or 'as it is'.
+	// It may return io.EOF if readSize + offset > fileSize.
+	finalize := func(result []byte, err error) ([]byte, error) {
+		if fileSize < 0 {
+			fileSize = int64(len(result)) + offset
+		}
+
+		if err == nil && readSize > fileSize-offset {
+			err = io.EOF
+			readSize = fileSize - offset
+		}
+
+		// Return at most the readSize as requested.
+		// A readSize of <= 0 means to return till EOF.
+		if readSize > 0 && int64(len(result)) > readSize {
+			return result[:readSize], err
+		}
+
+		// Return the whole file
+		if int64(len(result)) > fileSize {
+			return result[:fileSize], err
+		}
+
+		// Else just return the result.
+		return result, err
+	}
+
 	data := make([]byte, 0)
+
 	clusterNumber := 0
 	currentCluster := cluster
 
@@ -115,11 +145,11 @@ func (fs *Fs) readFileAt(cluster fatEntry, offset int64, size int) ([]byte, erro
 
 		nextCluster, err := fs.getFatEntry(currentCluster)
 		if err != nil {
-			return data, err
+			return finalize(data, err)
 		}
 
 		if !nextCluster.ReadAsNextCluster() {
-			return data, nil
+			return finalize(data, nil)
 		}
 
 		currentCluster = nextCluster
@@ -142,13 +172,13 @@ func (fs *Fs) readFileAt(cluster fatEntry, offset int64, size int) ([]byte, erro
 			skip = 0
 			sector, err := fs.fetch(firstSectorOfCluster + uint32(i))
 			if err != nil {
-				return data, err
+				return finalize(data, err)
 			}
 
 			newData := make([]byte, fs.info.BytesPerSector)
 			err = binary.Read(bytes.NewReader(sector.buffer), binary.LittleEndian, &newData)
 			if err != nil {
-				return nil, err
+				return finalize(nil, err)
 			}
 
 			// Trim the first bytes based on the offset if it is the first read.
@@ -161,13 +191,13 @@ func (fs *Fs) readFileAt(cluster fatEntry, offset int64, size int) ([]byte, erro
 		}
 
 		// Stop when the size needed is reached.
-		if size > 0 && (clusterNumber+1)*int(fs.info.SectorsPerCluster)*int(fs.info.BytesPerSector) >= int(offset)+size {
+		if readSize > int64(0) && int64(clusterNumber+1)*int64(fs.info.SectorsPerCluster)*int64(fs.info.BytesPerSector) >= offset+readSize {
 			break
 		}
 
 		nextCluster, err := fs.getFatEntry(currentCluster)
 		if err != nil {
-			return data, err
+			return finalize(data, err)
 		}
 
 		if !nextCluster.ReadAsNextCluster() {
@@ -178,16 +208,7 @@ func (fs *Fs) readFileAt(cluster fatEntry, offset int64, size int) ([]byte, erro
 		clusterNumber++
 	}
 
-	// Return everything if no size is given or the file size is not as big as the requested size.
-	if size <= 0 {
-		return data, nil
-	}
-
-	if size > len(data) {
-		return data, io.EOF
-	}
-
-	return data[:size], nil
+	return finalize(data, nil)
 }
 
 // parseDir reads and interprets a directory-file. It returns a slice of ExtendedEntryHeader,
@@ -315,7 +336,7 @@ func (fs *Fs) readDirAtSector(sectorNum uint32) ([]ExtendedEntryHeader, error) {
 }
 
 func (fs *Fs) readDir(cluster fatEntry) ([]ExtendedEntryHeader, error) {
-	data, err := fs.readFileAt(cluster, 0, 0)
+	data, err := fs.readFileAt(cluster, -1, 0, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -347,7 +368,10 @@ func (fs *Fs) readRoot() ([]ExtendedEntryHeader, error) {
 // (If skipping checks is disabled.)
 // It also calculates the filesystem type.
 func (fs *Fs) initialize(skipChecks bool) error {
-	fs.reader.Seek(0, io.SeekStart)
+	_, err := fs.reader.Seek(0, io.SeekStart)
+	if err != nil {
+		return err
+	}
 
 	// The data for the first sector is always in the first 512 so use that until the correct sector size is loaded.
 	// Note that almost all FAT filesystems use 512.

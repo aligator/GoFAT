@@ -49,18 +49,18 @@ func (mr *MockfatFileFsMockRecorder) readDir(cluster interface{}) *gomock.Call {
 }
 
 // readFileAt mocks base method.
-func (m *MockfatFileFs) readFileAt(cluster fatEntry, offset int64, size int) ([]byte, error) {
+func (m *MockfatFileFs) readFileAt(cluster fatEntry, fileSize, offset, readSize int64) ([]byte, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "readFileAt", cluster, offset, size)
+	ret := m.ctrl.Call(m, "readFileAt", cluster, fileSize, offset, readSize)
 	ret0, _ := ret[0].([]byte)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // readFileAt indicates an expected call of readFileAt.
-func (mr *MockfatFileFsMockRecorder) readFileAt(cluster, offset, size interface{}) *gomock.Call {
+func (mr *MockfatFileFsMockRecorder) readFileAt(cluster, fileSize, offset, readSize interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "readFileAt", reflect.TypeOf((*MockfatFileFs)(nil).readFileAt), cluster, offset, size)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "readFileAt", reflect.TypeOf((*MockfatFileFs)(nil).readFileAt), cluster, fileSize, offset, readSize)
 }
 
 // readRoot mocks base method.
