@@ -161,6 +161,8 @@ func (fs *Fs) readFileAt(cluster fatEntry, fileSize int64, offset int64, readSiz
 	skip := uint8(0)
 	// Calculate the sectors to skip for the first sector.
 	skip = uint8(offsetRest / int64(fs.info.BytesPerSector))
+
+	// Calculate the offsetRest -> the amount of bytes to skip on the first read sector.
 	offsetRest -= int64(fs.info.BytesPerSector) * int64(skip)
 
 	// Read the clusters.
@@ -299,7 +301,7 @@ func (fs *Fs) parseDir(data []byte) ([]ExtendedEntryHeader, error) {
 				if char == 0 {
 					break
 				}
-				// TODO: Not sure if fmt.Sprintf() in combination with rune() encodes the two-byte char correctly in all cases.
+				// TODO: Not sure if fmt.Sprintf() in combination with rune() decodes the two-byte char correctly in all cases.
 				newEntry.ExtendedName += fmt.Sprintf("%c", rune(char))
 			}
 		}

@@ -797,6 +797,35 @@ func TestFs_Open(t *testing.T) {
 		offset:       0,
 	}
 
+	fakeFolderEntryFAT16 := ExtendedEntryHeader{
+		ExtendedName: "DoNotEdit_tests",
+		EntryHeader: EntryHeader{
+			Name:            [11]byte{68, 79, 78, 79, 84, 69, 126, 49, 32, 32, 32},
+			Attribute:       AttrDirectory,
+			NTReserved:      0,
+			CreateTimeTenth: 82,
+			CreateTime:      44897,
+			CreateDate:      21044,
+			LastAccessDate:  21044,
+			FirstClusterHI:  0,
+			WriteTime:       44897,
+			WriteDate:       21044,
+			FirstClusterLO:  4,
+			FileSize:        0,
+		},
+	}
+	fakeFolderFileFAT16 := File{
+		fs:           nil,
+		path:         "DoNotEdit_tests",
+		isDirectory:  true,
+		isReadOnly:   false,
+		isHidden:     false,
+		isSystem:     false,
+		firstCluster: 4,
+		stat:         fakeFolderEntryFAT16.FileInfo(),
+		offset:       0,
+	}
+
 	type args struct {
 		path string
 	}
@@ -846,6 +875,51 @@ func TestFs_Open(t *testing.T) {
 		{
 			name: "not a folder",
 			fs:   testingNew(t, fat32TestFileReader()),
+			args: args{
+				path: "/non-existing-folder/HelloWorldThisIsALoongFileName.txt",
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "FAT16 root with ''",
+			fs:   testingNew(t, fat16TestFileReader()),
+			args: args{
+				path: "",
+			},
+			want:    &fakeRootFile,
+			wantErr: false,
+		},
+		{
+			name: "FAT16 root with '/'",
+			fs:   testingNew(t, fat16TestFileReader()),
+			args: args{
+				path: "/",
+			},
+			want:    &fakeRootFile,
+			wantErr: false,
+		},
+		{
+			name: "FAT16 folder",
+			fs:   testingNew(t, fat16TestFileReader()),
+			args: args{
+				path: testFolderInImages,
+			},
+			want:    &fakeFolderFileFAT16,
+			wantErr: false,
+		},
+		{
+			name: "FAT16 not existing folder",
+			fs:   testingNew(t, fat16TestFileReader()),
+			args: args{
+				path: "/non-existing-folder",
+			},
+			want:    nil,
+			wantErr: true,
+		},
+		{
+			name: "FAT16 not a folder",
+			fs:   testingNew(t, fat16TestFileReader()),
 			args: args{
 				path: "/non-existing-folder/HelloWorldThisIsALoongFileName.txt",
 			},
