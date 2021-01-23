@@ -31,7 +31,9 @@ const (
 	AttrSystem    = 0x04
 	AttrVolumeId  = 0x08
 	AttrDirectory = 0x10
-	AttrArchive   = 0x12
+	AttrArchive   = 0x20
+	AttrDevice    = 0x40
+	AttrReserved  = 0x80
 	AttrLongName  = AttrReadOnly | AttrHidden | AttrSystem | AttrVolumeId
 )
 
@@ -101,6 +103,7 @@ func NewSkipChecks(reader io.ReadSeeker) (*Fs, error) {
 func (fs *Fs) readFileAt(cluster fatEntry, fileSize int64, offset int64, readSize int64) ([]byte, error) {
 	// finalize returns the data sliced to either the readSize, the fileSize or 'as it is'.
 	// It may return io.EOF if readSize + offset > fileSize.
+	// Use it before any return in readFileAt.
 	finalize := func(result []byte, err error) ([]byte, error) {
 		if fileSize < 0 {
 			fileSize = int64(len(result)) + offset
@@ -109,6 +112,11 @@ func (fs *Fs) readFileAt(cluster fatEntry, fileSize int64, offset int64, readSiz
 		if err == nil && readSize > fileSize-offset {
 			err = io.EOF
 			readSize = fileSize - offset
+		}
+
+		// The file was not as long as it should be.
+		if err == nil && int64(len(result)) < fileSize-offset {
+			err = io.ErrUnexpectedEOF
 		}
 
 		// Return at most the readSize as requested.

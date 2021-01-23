@@ -17,28 +17,15 @@ import (
 
 const testFolderInImages = "DoNotEdit_tests"
 
-func fat32TestFileReader() io.ReadSeeker {
-	fsFile, err := os.Open("./testdata/fat32.img")
-	if err != nil {
-		fmt.Println("Make sure you ran go generate.")
-		panic(err)
-	}
+const (
+	fat32                         = "./testdata/fat32.img"
+	fat16                         = "./testdata/fat16.img"
+	fat32InvalidSectorsPerCluster = "./testdata/fat32-invalid-sectors-per-cluster.img"
+	fat16InvalidFiles             = "./testdata/fat16-invalid-files.img"
+)
 
-	return fsFile
-}
-
-func fat16TestFileReader() io.ReadSeeker {
-	fsFile, err := os.Open("./testdata/fat16.img")
-	if err != nil {
-		fmt.Println("Make sure you ran go generate.")
-		panic(err)
-	}
-
-	return fsFile
-}
-
-func fat32TooSmallTestFileReader() io.ReadSeeker {
-	fsFile, err := os.Open("./testdata/fat32-invalid-sectors-per-cluster.img")
+func testFileReader(file string) io.ReadSeeker {
+	fsFile, err := os.Open(file)
 	if err != nil {
 		fmt.Println("Make sure you ran go generate.")
 		panic(err)
@@ -71,7 +58,7 @@ func TestNew(t *testing.T) {
 		{
 			name: "FAT32 test image",
 			args: args{
-				reader: fat32TestFileReader(),
+				reader: testFileReader(fat32),
 			},
 			wantNotNil: true,
 			wantErr:    false,
@@ -79,7 +66,7 @@ func TestNew(t *testing.T) {
 		{
 			name: "FAT16 test image",
 			args: args{
-				reader: fat16TestFileReader(),
+				reader: testFileReader(fat16),
 			},
 			wantNotNil: true,
 			wantErr:    false,
@@ -95,7 +82,7 @@ func TestNew(t *testing.T) {
 		{
 			name: "fat32 invalid sectors per cluster test image",
 			args: args{
-				reader: fat32TooSmallTestFileReader(),
+				reader: testFileReader(fat32InvalidSectorsPerCluster),
 			},
 			wantNotNil: false,
 			wantErr:    true,
@@ -128,7 +115,7 @@ func TestNewSkipChecks(t *testing.T) {
 		{
 			name: "FAT32 test image",
 			args: args{
-				reader: fat32TestFileReader(),
+				reader: testFileReader(fat32),
 			},
 			wantNotNil: true,
 			wantErr:    false,
@@ -136,7 +123,7 @@ func TestNewSkipChecks(t *testing.T) {
 		{
 			name: "FAT16 test image",
 			args: args{
-				reader: fat16TestFileReader(),
+				reader: testFileReader(fat16),
 			},
 			wantNotNil: true,
 			wantErr:    false,
@@ -152,7 +139,7 @@ func TestNewSkipChecks(t *testing.T) {
 		{
 			name: "fat32 invalid sectors per cluster test image",
 			args: args{
-				reader: fat32TooSmallTestFileReader(),
+				reader: testFileReader(fat32InvalidSectorsPerCluster),
 			},
 			wantNotNil: true,
 			wantErr:    false,
@@ -797,6 +784,35 @@ func TestFs_Open(t *testing.T) {
 		offset:       0,
 	}
 
+	fakeFileEntry := ExtendedEntryHeader{
+		ExtendedName: "README.md",
+		EntryHeader: EntryHeader{
+			Name:            [11]byte{82, 69, 65, 68, 77, 69, 32, 32, 77, 68, 32},
+			Attribute:       AttrArchive,
+			NTReserved:      0,
+			CreateTimeTenth: 122,
+			CreateTime:      39428,
+			CreateDate:      21043,
+			LastAccessDate:  21043,
+			FirstClusterHI:  0,
+			WriteTime:       41936,
+			WriteDate:       20890,
+			FirstClusterLO:  53,
+			FileSize:        10513,
+		},
+	}
+	fakeFile := File{
+		fs:           nil,
+		path:         "/DoNotEdit_tests/README.md",
+		isDirectory:  false,
+		isReadOnly:   false,
+		isHidden:     false,
+		isSystem:     false,
+		firstCluster: 53,
+		stat:         fakeFileEntry.FileInfo(),
+		offset:       0,
+	}
+
 	fakeFolderEntryFAT16 := ExtendedEntryHeader{
 		ExtendedName: "DoNotEdit_tests",
 		EntryHeader: EntryHeader{
@@ -826,6 +842,35 @@ func TestFs_Open(t *testing.T) {
 		offset:       0,
 	}
 
+	fakeFileEntryFAT16 := ExtendedEntryHeader{
+		ExtendedName: "README.md",
+		EntryHeader: EntryHeader{
+			Name:            [11]byte{82, 69, 65, 68, 77, 69, 32, 32, 77, 68, 32},
+			Attribute:       AttrArchive,
+			NTReserved:      0,
+			CreateTimeTenth: 82,
+			CreateTime:      44897,
+			CreateDate:      21044,
+			LastAccessDate:  21044,
+			FirstClusterHI:  0,
+			WriteTime:       41936,
+			WriteDate:       20890,
+			FirstClusterLO:  6,
+			FileSize:        10513,
+		},
+	}
+	fakeFileFAT16 := File{
+		fs:           nil,
+		path:         "/DoNotEdit_tests/README.md",
+		isDirectory:  false,
+		isReadOnly:   false,
+		isHidden:     false,
+		isSystem:     false,
+		firstCluster: 6,
+		stat:         fakeFileEntryFAT16.FileInfo(),
+		offset:       0,
+	}
+
 	type args struct {
 		path string
 	}
@@ -838,7 +883,7 @@ func TestFs_Open(t *testing.T) {
 	}{
 		{
 			name: "root with ''",
-			fs:   testingNew(t, fat32TestFileReader()),
+			fs:   testingNew(t, testFileReader(fat32)),
 			args: args{
 				path: "",
 			},
@@ -847,7 +892,7 @@ func TestFs_Open(t *testing.T) {
 		},
 		{
 			name: "root with '/'",
-			fs:   testingNew(t, fat32TestFileReader()),
+			fs:   testingNew(t, testFileReader(fat32)),
 			args: args{
 				path: "/",
 			},
@@ -856,7 +901,7 @@ func TestFs_Open(t *testing.T) {
 		},
 		{
 			name: "folder",
-			fs:   testingNew(t, fat32TestFileReader()),
+			fs:   testingNew(t, testFileReader(fat32)),
 			args: args{
 				path: testFolderInImages,
 			},
@@ -865,7 +910,7 @@ func TestFs_Open(t *testing.T) {
 		},
 		{
 			name: "not existing folder",
-			fs:   testingNew(t, fat32TestFileReader()),
+			fs:   testingNew(t, testFileReader(fat32)),
 			args: args{
 				path: "/non-existing-folder",
 			},
@@ -873,17 +918,17 @@ func TestFs_Open(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "not a folder",
-			fs:   testingNew(t, fat32TestFileReader()),
+			name: "file",
+			fs:   testingNew(t, testFileReader(fat32)),
 			args: args{
-				path: "/non-existing-folder/HelloWorldThisIsALoongFileName.txt",
+				path: "/" + testFolderInImages + "/README.md",
 			},
-			want:    nil,
-			wantErr: true,
+			want:    &fakeFile,
+			wantErr: false,
 		},
 		{
 			name: "FAT16 root with ''",
-			fs:   testingNew(t, fat16TestFileReader()),
+			fs:   testingNew(t, testFileReader(fat16)),
 			args: args{
 				path: "",
 			},
@@ -892,7 +937,7 @@ func TestFs_Open(t *testing.T) {
 		},
 		{
 			name: "FAT16 root with '/'",
-			fs:   testingNew(t, fat16TestFileReader()),
+			fs:   testingNew(t, testFileReader(fat16)),
 			args: args{
 				path: "/",
 			},
@@ -901,7 +946,7 @@ func TestFs_Open(t *testing.T) {
 		},
 		{
 			name: "FAT16 folder",
-			fs:   testingNew(t, fat16TestFileReader()),
+			fs:   testingNew(t, testFileReader(fat16)),
 			args: args{
 				path: testFolderInImages,
 			},
@@ -910,7 +955,7 @@ func TestFs_Open(t *testing.T) {
 		},
 		{
 			name: "FAT16 not existing folder",
-			fs:   testingNew(t, fat16TestFileReader()),
+			fs:   testingNew(t, testFileReader(fat16)),
 			args: args{
 				path: "/non-existing-folder",
 			},
@@ -918,13 +963,13 @@ func TestFs_Open(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "FAT16 not a folder",
-			fs:   testingNew(t, fat16TestFileReader()),
+			name: "FAT16 file",
+			fs:   testingNew(t, testFileReader(fat16)),
 			args: args{
-				path: "/non-existing-folder/HelloWorldThisIsALoongFileName.txt",
+				path: "/" + testFolderInImages + "/README.md",
 			},
-			want:    nil,
-			wantErr: true,
+			want:    &fakeFileFAT16,
+			wantErr: false,
 		},
 	}
 	for _, tt := range tests {
@@ -1230,7 +1275,7 @@ func TestFs_readFile(t *testing.T) {
 	}{
 		{
 			name: "read a file (without fileSize)",
-			fs:   testingNew(t, fat32TestFileReader()),
+			fs:   testingNew(t, testFileReader(fat32)),
 			args: args{
 				cluster:  53,
 				fileSize: -1,
@@ -1242,7 +1287,7 @@ func TestFs_readFile(t *testing.T) {
 		},
 		{
 			name: "read the whole file (with file size)",
-			fs:   testingNew(t, fat32TestFileReader()),
+			fs:   testingNew(t, testFileReader(fat32)),
 			args: args{
 				cluster:  53,
 				fileSize: 10513,
@@ -1254,7 +1299,7 @@ func TestFs_readFile(t *testing.T) {
 		},
 		{
 			name: "read subset of a file",
-			fs:   testingNew(t, fat32TestFileReader()),
+			fs:   testingNew(t, testFileReader(fat32)),
 			args: args{
 				cluster:  53,
 				fileSize: -1,
@@ -1266,7 +1311,7 @@ func TestFs_readFile(t *testing.T) {
 		},
 		{
 			name: "read subset in the middle of a file",
-			fs:   testingNew(t, fat32TestFileReader()),
+			fs:   testingNew(t, testFileReader(fat32)),
 			args: args{
 				cluster:  53,
 				fileSize: -1,
@@ -1278,7 +1323,7 @@ func TestFs_readFile(t *testing.T) {
 		},
 		{
 			name: "read over EOF over last sector size (fileSize -1)",
-			fs:   testingNew(t, fat32TestFileReader()),
+			fs:   testingNew(t, testFileReader(fat32)),
 			args: args{
 				cluster:  53,
 				fileSize: -1,
@@ -1290,7 +1335,7 @@ func TestFs_readFile(t *testing.T) {
 		},
 		{
 			name: "read over EOF with file size",
-			fs:   testingNew(t, fat32TestFileReader()),
+			fs:   testingNew(t, testFileReader(fat32)),
 			args: args{
 				cluster:  53,
 				fileSize: 10513,
@@ -1300,7 +1345,30 @@ func TestFs_readFile(t *testing.T) {
 			want:    []byte(" test GoFAT.\n"),
 			wantErr: io.EOF,
 		},
-		// TODO: add some tests with a broken file?
+		{
+			name: "seek over cluster bound with wrong cluster marker (EOC)",
+			fs:   testingNew(t, testFileReader(fat16InvalidFiles)),
+			args: args{
+				cluster:  6,
+				fileSize: 10513,
+				offset:   10500,
+				readSize: 15,
+			},
+			want:    []byte{},
+			wantErr: io.EOF,
+		},
+		{
+			name: "seek over cluster bound with wrong cluster marker (EOC)",
+			fs:   testingNew(t, testFileReader(fat16InvalidFiles)),
+			args: args{
+				cluster:  6,
+				fileSize: 10513,
+				offset:   0,
+				readSize: 0,
+			},
+			want:    []byte("## GoFAT\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an example FAT32 volume used to test GoFAT.\nThis is an "),
+			wantErr: io.ErrUnexpectedEOF,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
