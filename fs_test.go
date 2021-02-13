@@ -1,6 +1,7 @@
 package gofat
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -851,7 +852,7 @@ func TestFs_Open(t *testing.T) {
 			CreateTimeTenth: 82,
 			CreateTime:      44897,
 			CreateDate:      21044,
-			LastAccessDate:  21044,
+			LastAccessDate:  21069,
 			FirstClusterHI:  0,
 			WriteTime:       41936,
 			WriteDate:       20890,
@@ -1374,7 +1375,7 @@ func TestFs_readFile(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			fs := tt.fs
 			got, err := fs.readFileAt(tt.args.cluster, tt.args.fileSize, tt.args.offset, tt.args.readSize)
-			if err != tt.wantErr {
+			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("readFileAt() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}

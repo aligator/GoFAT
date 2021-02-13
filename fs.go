@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/aligator/gofat/checkpoint"
 	"io"
 	"os"
 	"path/filepath"
@@ -35,6 +36,17 @@ const (
 	AttrDevice    = 0x40
 	AttrReserved  = 0x80
 	AttrLongName  = AttrReadOnly | AttrHidden | AttrSystem | AttrVolumeId
+)
+
+// These errors may occur while processing a FAT filesystem.
+var (
+	ErrOpenFilesystem       = errors.New("could not open the filesystem")
+	ErrReadFilesystemFile   = errors.New("could not read file completely from the filesystem")
+	ErrReadFilesystemDir    = errors.New("could not a directory from the filesystem")
+	ErrNotSupported         = errors.New("not supported")
+	ErrInitializeFilesystem = errors.New("initialize the filesystem")
+	ErrFetchingSector       = errors.New("could not fetch a new sector")
+	ErrReadFat              = errors.New("could not read FAT sector")
 )
 
 // Info contains all information about the whole filesystem.
@@ -73,7 +85,7 @@ func New(reader io.ReadSeeker) (*Fs, error) {
 
 	err := fs.initialize(false)
 	if err != nil {
-		return nil, err
+		return nil, checkpoint.Wrap(err, ErrOpenFilesystem)
 	}
 	return fs, nil
 }
@@ -88,7 +100,7 @@ func NewSkipChecks(reader io.ReadSeeker) (*Fs, error) {
 
 	err := fs.initialize(true)
 	if err != nil {
-		return nil, err
+		return nil, checkpoint.Wrap(err, ErrOpenFilesystem)
 	}
 	return fs, err
 }
@@ -122,16 +134,16 @@ func (fs *Fs) readFileAt(cluster fatEntry, fileSize int64, offset int64, readSiz
 		// Return at most the readSize as requested.
 		// A readSize of <= 0 means to return till EOF.
 		if readSize > 0 && int64(len(result)) > readSize {
-			return result[:readSize], err
+			return result[:readSize], checkpoint.Wrap(err, ErrReadFilesystemFile)
 		}
 
 		// Return the whole file
 		if int64(len(result)) > fileSize {
-			return result[:fileSize], err
+			return result[:fileSize], checkpoint.Wrap(err, ErrReadFilesystemFile)
 		}
 
 		// Else just return the result.
-		return result, err
+		return result, checkpoint.Wrap(err, ErrReadFilesystemFile)
 	}
 
 	data := make([]byte, 0)
@@ -228,7 +240,7 @@ func (fs *Fs) parseDir(data []byte) ([]ExtendedEntryHeader, error) {
 
 	err := binary.Read(bytes.NewReader(data), binary.LittleEndian, &entries)
 	if err != nil {
-		return nil, err
+		return nil, checkpoint.Wrap(err, ErrReadFilesystemDir)
 	}
 
 	// Convert to fatFiles and filter empty entries.
@@ -267,7 +279,7 @@ func (fs *Fs) parseDir(data []byte) ([]ExtendedEntryHeader, error) {
 			longFilenameEntry := LongFilenameEntry{}
 			err = binary.Read(bytes.NewReader(entryBytes), binary.LittleEndian, &longFilenameEntry)
 			if err != nil {
-				return nil, err
+				return nil, checkpoint.Wrap(err, ErrReadFilesystemDir)
 			}
 
 			// Ignore deleted entry.
@@ -289,6 +301,8 @@ func (fs *Fs) parseDir(data []byte) ([]ExtendedEntryHeader, error) {
 		newEntry := ExtendedEntryHeader{EntryHeader: entry}
 		if longFilename != nil {
 			sort.SliceStable(longFilename, func(i, j int) bool {
+				// TODO is this really intended for sorting?? or is it just for validation?
+
 				// Sort by the Sequence number field:
 				// (bit 6: last logical, first physical LFN entry, bit 5: 0; bits 4-0: number 0x01..0x14 (0x1F), deleted entry: 0xE5)
 				return longFilename[i].Sequence&0b0001111 < longFilename[j].Sequence&0b0001111
@@ -330,13 +344,13 @@ func (fs *Fs) readDirAtSector(sectorNum uint32) ([]ExtendedEntryHeader, error) {
 	for i := uint32(0); i < rootDirSectorsCount; i++ {
 		sector, err := fs.fetch(sectorNum + i)
 		if err != nil {
-			return nil, err
+			return nil, checkpoint.Wrap(err, ErrReadFilesystemDir)
 		}
 
 		newData := make([]byte, fs.info.BytesPerSector)
 		err = binary.Read(bytes.NewReader(sector.buffer), binary.LittleEndian, &newData)
 		if err != nil {
-			return nil, err
+			return nil, checkpoint.Wrap(err, ErrReadFilesystemDir)
 		}
 
 		data = append(data, newData...)
@@ -348,7 +362,7 @@ func (fs *Fs) readDirAtSector(sectorNum uint32) ([]ExtendedEntryHeader, error) {
 func (fs *Fs) readDir(cluster fatEntry) ([]ExtendedEntryHeader, error) {
 	data, err := fs.readFileAt(cluster, -1, 0, 0)
 	if err != nil {
-		return nil, err
+		return nil, checkpoint.Wrap(err, ErrReadFilesystemDir)
 	}
 
 	return fs.parseDir(data)
@@ -358,7 +372,7 @@ func (fs *Fs) readDir(cluster fatEntry) ([]ExtendedEntryHeader, error) {
 // from the first root cluster if the type is FAT32.
 func (fs *Fs) readRoot() ([]ExtendedEntryHeader, error) {
 	if fs.info.FSType == FAT12 {
-		panic("not supported")
+		checkpoint.From(ErrNotSupported)
 	}
 
 	var root []ExtendedEntryHeader
@@ -371,7 +385,7 @@ func (fs *Fs) readRoot() ([]ExtendedEntryHeader, error) {
 		root, err = fs.readDir(fs.info.fat32Specific.RootCluster)
 	}
 
-	return root, err
+	return root, checkpoint.Wrap(err, ErrReadFilesystemDir)
 }
 
 // initialize a FAT filesystem. Some checks are done to validate if it is a valid FAT filesystem.
@@ -400,45 +414,45 @@ func (fs *Fs) initialize(skipChecks bool) error {
 	bpb := BPB{}
 	err = binary.Read(bytes.NewReader(sector.buffer), binary.LittleEndian, &bpb)
 	if err != nil {
-		return err
+		return checkpoint.Wrap(err, fmt.Errorf("%w: parsing the bpb sector failed", ErrInitializeFilesystem))
 	}
 
 	if !skipChecks {
 		// Check if it is really a FAT filesystem.
 		// Check for valid jump instructions
 		if !(bpb.BSJumpBoot[0] == 0xEB && bpb.BSJumpBoot[2] == 0x90) && !(bpb.BSJumpBoot[0] == 0xE9) {
-			return errors.New("no valid jump instructions at the beginning")
+			return checkpoint.From(fmt.Errorf("%w: no valid jump instructions at the beginning", ErrInitializeFilesystem))
 		}
 
 		// Load the sector size and use it for all following sector reads.
 		// Also FAT only supports 512, 1024, 2048 and 4096
 		if bpb.BytesPerSector != 512 && bpb.BytesPerSector != 1024 && bpb.BytesPerSector != 2048 && bpb.BytesPerSector != 4096 {
-			return errors.New("invalid sector size")
+			return checkpoint.From(fmt.Errorf("%w: invalid sector size", ErrInitializeFilesystem))
 		}
 
 		// Sectors per cluster has to be a power of two and greater than 0.
 		// Also the whole cluster size should not be more than 32K.
 		if bpb.SectorsPerCluster%2 != 0 || bpb.SectorsPerCluster == 0 || (bpb.BytesPerSector*uint16(bpb.SectorsPerCluster)) > (32*1024) {
-			return errors.New("invalid sectors per cluster")
+			return checkpoint.From(fmt.Errorf("%w: invalid sectors per cluster", ErrInitializeFilesystem))
 		}
 
 		// The reserved sector count should not be 0.
 		// Note: for FAT12 and FAT16 it is typically 1 for FAT32 it is typically 32.
 		if bpb.ReservedSectorCount == 0 {
-			return errors.New("invalid reserved sector count")
+			return checkpoint.From(fmt.Errorf("%w: invalid reserved sector count", ErrInitializeFilesystem))
 		}
 
 		if bpb.NumFATs < 1 {
-			return errors.New("invalid FAT count")
+			return checkpoint.From(fmt.Errorf("%w: invalid FAT count", ErrInitializeFilesystem))
 		}
 
 		if bpb.Media != 0xF0 &&
 			!(bpb.Media >= 0xF8 && bpb.Media <= 0xFF) {
-			return errors.New("invalid media value")
+			return checkpoint.From(fmt.Errorf("%w: invalid media value", ErrInitializeFilesystem))
 		}
 
 		if sector.buffer[510] != 0x55 || sector.buffer[511] != 0xAA {
-			return errors.New("invalid signature at offset 510 / 511")
+			return checkpoint.From(fmt.Errorf("%w: invalid signature at offset 510 / 511", ErrInitializeFilesystem))
 		}
 	}
 
@@ -453,7 +467,7 @@ func (fs *Fs) initialize(skipChecks bool) error {
 		// Read the FAT32 specific data.
 		err = binary.Read(bytes.NewReader(bpb.FATSpecificData[:]), binary.LittleEndian, &fs.info.fat32Specific)
 		if err != nil {
-			return err
+			return checkpoint.Wrap(err, fmt.Errorf("%w: parsing the fat32 specific data failed", ErrInitializeFilesystem))
 		}
 		fs.info.FatSize = fs.info.fat32Specific.FatSize
 	}
@@ -470,7 +484,7 @@ func (fs *Fs) initialize(skipChecks bool) error {
 	// Now the correct type can be determined based on the cluster count.
 	if countOfClusters < 4085 {
 		// For now do not support FAT12 as its a bit more complicated.
-		return errors.New("FAT12 is not supported")
+		return checkpoint.From(fmt.Errorf("%w: FAT12 is not supported", ErrNotSupported))
 	} else if countOfClusters < 65525 {
 		fs.info.FSType = FAT16
 	} else {
@@ -479,7 +493,7 @@ func (fs *Fs) initialize(skipChecks bool) error {
 
 	// The root entry count has to be 0 for FAT32 and has to fit exactly into the sectors.
 	if fs.info.FSType == FAT32 && bpb.RootEntryCount != 0 || (fs.info.FSType != FAT32 && (bpb.RootEntryCount*32)%bpb.BytesPerSector != 0) {
-		return errors.New("invalid root entry count")
+		return checkpoint.From(fmt.Errorf("%w: invalid root entry count", ErrInitializeFilesystem))
 	}
 
 	// Now all needed data can be saved. See FAT spec for details.
@@ -501,7 +515,7 @@ func (fs *Fs) initialize(skipChecks bool) error {
 	} else {
 		err = binary.Read(bytes.NewReader(bpb.FATSpecificData[:]), binary.LittleEndian, &fs.info.fat16Specific)
 		if err != nil {
-			return err
+			return checkpoint.Wrap(err, fmt.Errorf("%w: parsing the fat16 specific data failed", ErrInitializeFilesystem))
 		}
 
 		fs.info.Label = string(fs.info.fat16Specific.BSVolumeLabel[:])
@@ -527,12 +541,12 @@ func (fs *Fs) fetch(sectorNum uint32) (Sector, error) {
 	// Seek to and Read the new sectorNum.
 	_, err := fs.reader.Seek(int64(sectorNum)*int64(fs.info.BytesPerSector), io.SeekStart)
 	if err != nil {
-		return Sector{}, err
+		return Sector{}, checkpoint.Wrap(err, fmt.Errorf("%w: sector %d", ErrFetchingSector, sectorNum))
 	}
 
 	_, err = fs.reader.Read(sector.buffer)
 	if err != nil {
-		return Sector{}, err
+		return Sector{}, checkpoint.Wrap(err, fmt.Errorf("%w: sector %d", ErrFetchingSector, sectorNum))
 	}
 
 	sector.current = sectorNum
@@ -616,7 +630,7 @@ func (e fatEntry) ReadAsEOF() bool {
 // getFatEntry returns the next fat entry for the given cluster.
 func (fs *Fs) getFatEntry(cluster fatEntry) (fatEntry, error) {
 	if fs.info.FSType == FAT12 {
-		panic("not supported")
+		return 0, checkpoint.From(ErrNotSupported)
 	}
 
 	var fatOffset uint32
@@ -632,7 +646,7 @@ func (fs *Fs) getFatEntry(cluster fatEntry) (fatEntry, error) {
 
 	sector, err := fs.fetch(fatSectorNumber)
 	if err != nil {
-		return 0, err
+		return 0, checkpoint.Wrap(err, ErrReadFat)
 	}
 
 	switch fs.info.FSType {
@@ -650,7 +664,7 @@ func (fs *Fs) getFatEntry(cluster fatEntry) (fatEntry, error) {
 		return fatEntry(fat32ClusterEntryValue), nil
 	}
 
-	panic("not supported")
+	return 0, checkpoint.From(ErrNotSupported)
 }
 
 func (fs *Fs) store() error {
@@ -708,7 +722,7 @@ func (fs *Fs) Open(path string) (afero.File, error) {
 
 	content, err := fs.readRoot()
 	if err != nil {
-		return nil, err
+		return nil, checkpoint.Wrap(err, ErrOpenFilesystem)
 	}
 
 	// Go through the path until the last pathPart and then use the contents of that folder as result.
@@ -738,21 +752,21 @@ pathLoop:
 
 				// Else try to go deeper.
 				if !fileInfo.IsDir() {
-					return nil, syscall.ENOTDIR
+					return nil, checkpoint.Wrap(syscall.ENOTDIR, ErrOpenFilesystem)
 				}
 
 				content, err = fs.readDir(fatEntry(uint32(entry.FirstClusterHI)<<16 | uint32(entry.FirstClusterLO)))
 				if err != nil {
-					return nil, err
+					return nil, checkpoint.Wrap(err, ErrOpenFilesystem)
 				}
 
 				continue pathLoop
 			}
 		}
-		return nil, errors.New("no matching path found: ***/" + pathPart + "/***")
+		return nil, checkpoint.Wrap(ErrOpenFilesystem, errors.New("no matching path found: ***/"+pathPart+"/***"))
 	}
 
-	return nil, errors.New("path doesn't exist: " + path)
+	return nil, checkpoint.Wrap(ErrOpenFilesystem, errors.New("path doesn't exist: "+path))
 }
 
 func (fs *Fs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
@@ -775,7 +789,7 @@ func (fs *Fs) Rename(oldname, newname string) error {
 func (fs *Fs) Stat(path string) (os.FileInfo, error) {
 	file, err := fs.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, checkpoint.From(errors.New("path doesn't exist: " + path))
 	}
 	defer file.Close()
 

@@ -625,7 +625,7 @@ func TestFile_Readdir(t *testing.T) {
 
 			mockCtrl.Finish()
 
-			if err != tt.wantErr {
+			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("File.Readdir() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
@@ -766,7 +766,7 @@ func TestFile_Readdirnames(t *testing.T) {
 
 			mockCtrl.Finish()
 
-			if err != tt.wantErr {
+			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("File.Readdirnames() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}

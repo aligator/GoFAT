@@ -1,11 +1,21 @@
 package gofat
 
 import (
+	"errors"
+	"fmt"
+	"github.com/aligator/gofat/checkpoint"
 	"io"
 	"os"
 	"syscall"
 
 	"github.com/spf13/afero"
+)
+
+// These errors may occur while processing a file.
+var (
+	ErrReadFile = errors.New("could not read file completely")
+	ErrSeekFile = errors.New("could not seek inside of the file")
+	ErrReadDir  = errors.New("could not read the directory")
 )
 
 // fatFileFs provides all methods needed from a fat filesystem for File.
@@ -49,12 +59,12 @@ func (f *File) Close() error {
 func (f *File) Read(p []byte) (n int, err error) {
 	data, err := f.fs.readFileAt(f.firstCluster, f.stat.Size(), f.offset, int64(len(p)))
 	if err != nil {
-		return len(data), err
+		return len(data), checkpoint.Wrap(err, ErrReadFile)
 	}
 
 	copy(p, data)
 	if len(data) < len(p) {
-		return len(data), io.EOF
+		return len(data), checkpoint.Wrap(io.EOF, ErrReadFile)
 	}
 	return len(data), nil
 }
@@ -63,16 +73,19 @@ func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
 	size := len(p)
 	data, err := f.fs.readFileAt(f.firstCluster, f.stat.Size(), off, int64(size))
 	if err != nil {
-		return len(data), err
+		return len(data), checkpoint.Wrap(err, ErrReadFile)
 	}
 
 	copy(p, data)
 	if len(data) < size {
-		return len(data), io.EOF
+		return len(data), checkpoint.Wrap(err, ErrReadFile)
 	}
 	return len(data), nil
 }
 
+// Seek jumps to a specific offset in the file. This affects all Read operation except ReadAt.
+// May return a syscall.EINVAL error if the whence value is invalid.
+// May return an afero.ErrOutOfRange error if the offset is out of range.
 func (f *File) Seek(offset int64, whence int) (int64, error) {
 	switch whence {
 	case io.SeekStart:
@@ -81,11 +94,11 @@ func (f *File) Seek(offset int64, whence int) (int64, error) {
 	case io.SeekEnd:
 		offset = f.stat.Size() - offset
 	default:
-		return 0, syscall.EINVAL
+		return 0, checkpoint.Wrap(ErrSeekFile, fmt.Errorf("%w, offset: %v, whence: %v", syscall.EINVAL, offset, whence))
 	}
 
 	if offset < 0 || offset > f.stat.Size() {
-		return 0, afero.ErrOutOfRange
+		return 0, checkpoint.Wrap(afero.ErrOutOfRange, fmt.Errorf("%w, offset: %v, whence: %v", ErrSeekFile, offset, whence))
 	}
 
 	f.offset = offset
@@ -104,9 +117,11 @@ func (f *File) Name() string {
 	return f.stat.Name()
 }
 
+// Readdir reads the contents of a directory.
+// May return syscall.ENOTDIR if the current File is no directory.
 func (f *File) Readdir(count int) ([]os.FileInfo, error) {
 	if !f.isDirectory {
-		return nil, syscall.ENOTDIR
+		return nil, checkpoint.Wrap(syscall.ENOTDIR, ErrReadDir)
 	}
 
 	var content []ExtendedEntryHeader
@@ -118,7 +133,7 @@ func (f *File) Readdir(count int) ([]os.FileInfo, error) {
 	}
 
 	if err != nil {
-		return nil, err
+		return nil, checkpoint.Wrap(err, ErrReadDir)
 	}
 
 	// TODO: Maybe support the count param directly in readDir to avoid reading too much.
@@ -138,7 +153,7 @@ func (f *File) Readdir(count int) ([]os.FileInfo, error) {
 func (f *File) Readdirnames(count int) ([]string, error) {
 	content, err := f.Readdir(count)
 	if err != nil {
-		return nil, err
+		return nil, checkpoint.Wrap(err, ErrReadDir)
 	}
 
 	names := make([]string, len(content))
