@@ -79,7 +79,6 @@ Some resources on how FAT works are:
 
 * more tests
 * implement some more attributes (e.g. hidden)
-* long filenames need some more validation according to the specs (e.g. checksum, ...)
 * implement write support
 * support FAT12
 * check if compatibility with TinyGo for microcontrollers is possible. That would be a good use case for this lib...
