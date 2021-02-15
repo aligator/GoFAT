@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -243,8 +242,15 @@ func (fs *Fs) parseDir(data []byte) ([]ExtendedEntryHeader, error) {
 		return nil, checkpoint.Wrap(err, ErrReadFilesystemDir)
 	}
 
-	// Convert to fatFiles and filter empty entries.
 	var longFilename []LongFilenameEntry
+	var lastLongFilenameIndex = -1
+
+	resetLongFilename := func(i int) {
+		longFilename = nil
+		lastLongFilenameIndex = i
+	}
+
+	// Convert to fatFiles and filter empty entries.
 	directory := make([]ExtendedEntryHeader, 0)
 	for i, entry := range entries {
 		// Check the first byte of the name as it may contain special values.
@@ -287,50 +293,88 @@ func (fs *Fs) parseDir(data []byte) ([]ExtendedEntryHeader, error) {
 				continue
 			}
 
+			// If the 0x40 bit of the sequence is set, it means that this is the beginning of a long filename.
+			// Therefore we need to reset everything before.
+			if longFilenameEntry.Sequence&0x40 == 0x40 {
+				resetLongFilename(i - 1)
+			}
+
+			if lastLongFilenameIndex+1 != i {
+				// All long filename parts have to be directly after each other.
+				// So reset if there is a hole.
+				resetLongFilename(i)
+				continue
+			}
+
 			longFilename = append(longFilename, longFilenameEntry)
+			lastLongFilenameIndex = i
 			continue
 		}
 
 		// Filter out not displayed entries.
 		if entry.Attribute&AttrVolumeId == AttrVolumeId {
-			// Reset long filename for next file.
-			longFilename = nil
 			continue
 		}
 
 		newEntry := ExtendedEntryHeader{EntryHeader: entry}
-		if longFilename != nil {
-			sort.SliceStable(longFilename, func(i, j int) bool {
-				// TODO is this really intended for sorting?? or is it just for validation?
-
-				// Sort by the Sequence number field:
-				// (bit 6: last logical, first physical LFN entry, bit 5: 0; bits 4-0: number 0x01..0x14 (0x1F), deleted entry: 0xE5)
-				return longFilename[i].Sequence&0b0001111 < longFilename[j].Sequence&0b0001111
-			})
-
-			// TODO: check checksum and if invalid ignore the long name.
-			//       Also add more sanity checks. e.g. the long filename entries have to occur in a continuous way
-			//       without something in between.
-
-			var chars []uint16
-			for _, namePart := range longFilename {
-				chars = append(chars, namePart.First[:]...)
-				chars = append(chars, namePart.Second[:]...)
-				chars = append(chars, namePart.Third[:]...)
+		// If the longFilename exists and the last longFilename part was the directly previous entry.
+		if longFilename != nil && lastLongFilenameIndex+1 == i {
+			// Calculate the checksum for the entry.
+			var checksum byte = 0
+			for i := 0; i < 11; i++ {
+				checksum = (((checksum & 1) << 7) | ((checksum & 0xfe) >> 1)) + newEntry.Name[i]
 			}
 
-			for _, char := range chars {
-				if char == 0 {
+			var chars []uint16
+			var valid = true
+
+			// Run through the filename parts in reverse order.
+			// Check the checksum and sequence numbers for each entry.
+			// If everything is valid, save the full long name.
+			sequenceNumber := 0
+			for longFilenameIndex := len(longFilename) - 1; longFilenameIndex >= 0; longFilenameIndex-- {
+				sequenceNumber++
+
+				current := longFilename[longFilenameIndex]
+				// If any checksum is wrong, the long filename is corrupt.
+				if current.Checksum != checksum {
+					valid = false
 					break
 				}
-				// TODO: Not sure if fmt.Sprintf() in combination with rune() decodes the two-byte char correctly in all cases.
-				newEntry.ExtendedName += fmt.Sprintf("%c", rune(char))
+
+				// If any sequence number is invalid, the long filename is corrupt.
+				// A correct long filename looks like this:
+				//  <proceeding files...>
+				//  <slot #3, id = 0x43, characters = "h is long">
+				//  <slot #2, id = 0x02, characters = "xtension whic">
+				//  <slot #1, id = 0x01, characters = "My Big File.E">
+				//  <directory entry, name = "MYBIGFIL.EXT">
+				// (the 0x40 bit is already checked above)
+				if current.Sequence&0b0001111 != byte(sequenceNumber) {
+					valid = false
+					break
+				}
+
+				chars = append(chars, current.First[:]...)
+				chars = append(chars, current.Second[:]...)
+				chars = append(chars, current.Third[:]...)
+			}
+
+			if valid {
+				for _, char := range chars {
+					if char == 0 {
+						break
+					}
+					// TODO: Not sure if fmt.Sprintf() in combination with rune() decodes the char correctly in all cases.
+					// 		 Note for this:  Each Unicode character takes either two or four bytes, UTF-16LE encoded.
+					newEntry.ExtendedName += fmt.Sprintf("%c", rune(char))
+				}
 			}
 		}
 		directory = append(directory, newEntry)
 
 		// Reset long filename for next file.
-		longFilename = nil
+		resetLongFilename(i)
 	}
 
 	return directory, nil
