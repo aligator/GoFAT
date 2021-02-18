@@ -6,6 +6,7 @@ package checkpoint
 import (
 	"errors"
 	"fmt"
+	"io"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -14,6 +15,15 @@ import (
 // From just wraps an error by a new checkpoint which adds some caller information to the error.
 // It returns nil, if err == nil.
 func From(err error) error {
+	// io.EOF must be returned as io.EOF directly
+	// https://github.com/golang/go/issues/39155
+	if err == io.EOF {
+		return io.EOF
+	}
+	if err == io.ErrUnexpectedEOF {
+		return io.ErrUnexpectedEOF
+	}
+
 	if err == nil {
 		return nil
 	}
@@ -54,6 +64,12 @@ func From(err error) error {
 // but also for the error returned by somethingOtherThatThrowsErrors() (if you know what error it is).
 // If the error in this example is nil, no checkpoint gets created.
 func Wrap(prev, err error) error {
+	// io.EOF must be returned as io.EOF directly
+	// https://github.com/golang/go/issues/39155
+	if prev == io.EOF {
+		return io.EOF
+	}
+
 	if prev == nil {
 		return nil
 	}

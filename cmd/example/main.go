@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
+	"github.com/aligator/gofat"
 	"github.com/spf13/afero"
 	"io"
+	"io/ioutil"
 	"os"
-
-	"github.com/aligator/gofat"
 )
 
 // main is just a example main to play with GoFAT.
@@ -31,9 +31,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	f, err := fat.Open("go/main.go")
+	fmt.Println(err)
+	bytes, err := ioutil.ReadAll(f)
+	fmt.Println(bytes, err)
+	//panic("")
+
 	fmt.Printf("Opened volume '%v' with type %v\n\n", fat.Label(), fat.FSType())
 
-	afero.Walk(fat, "/", func(path string, info os.FileInfo, err error) error {
+	afero.Walk(fat, "", func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			fmt.Println(err)
 			return err
@@ -42,7 +48,7 @@ func main() {
 		return nil
 	})
 
-	file, err := fat.Open("/README.md")
+	file, err := fat.Open("README.md")
 	if err != nil {
 		fmt.Println("could not open the root file", err)
 		os.Exit(1)

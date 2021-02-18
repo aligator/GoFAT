@@ -751,7 +751,7 @@ func TestFs_Open(t *testing.T) {
 		},
 	}
 	fakeRootFile := File{
-		path:        "/",
+		path:        "",
 		isDirectory: true,
 		stat:        fakeRootEntry.FileInfo(),
 	}
@@ -804,7 +804,7 @@ func TestFs_Open(t *testing.T) {
 	}
 	fakeFile := File{
 		fs:           nil,
-		path:         "/DoNotEdit_tests/README.md",
+		path:         "DoNotEdit_tests/README.md",
 		isDirectory:  false,
 		isReadOnly:   false,
 		isHidden:     false,
@@ -862,7 +862,7 @@ func TestFs_Open(t *testing.T) {
 	}
 	fakeFileFAT16 := File{
 		fs:           nil,
-		path:         "/DoNotEdit_tests/README.md",
+		path:         "DoNotEdit_tests/README.md",
 		isDirectory:  false,
 		isReadOnly:   false,
 		isHidden:     false,
@@ -883,22 +883,21 @@ func TestFs_Open(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name: "root with ''",
+			name: "root with '.'",
 			fs:   testingNew(t, testFileReader(fat32)),
 			args: args{
-				path: "",
+				path: ".",
 			},
 			want:    &fakeRootFile,
 			wantErr: false,
 		},
 		{
-			name: "root with '/'",
+			name: "'/'",
 			fs:   testingNew(t, testFileReader(fat32)),
 			args: args{
 				path: "/",
 			},
-			want:    &fakeRootFile,
-			wantErr: false,
+			wantErr: true,
 		},
 		{
 			name: "folder",
@@ -922,28 +921,27 @@ func TestFs_Open(t *testing.T) {
 			name: "file",
 			fs:   testingNew(t, testFileReader(fat32)),
 			args: args{
-				path: "/" + testFolderInImages + "/README.md",
+				path: testFolderInImages + "/README.md",
 			},
 			want:    &fakeFile,
 			wantErr: false,
 		},
 		{
-			name: "FAT16 root with ''",
+			name: "FAT16 root with '.'",
 			fs:   testingNew(t, testFileReader(fat16)),
 			args: args{
-				path: "",
+				path: ".",
 			},
 			want:    &fakeRootFile,
 			wantErr: false,
 		},
 		{
-			name: "FAT16 root with '/'",
+			name: "FAT16 '/'",
 			fs:   testingNew(t, testFileReader(fat16)),
 			args: args{
 				path: "/",
 			},
-			want:    &fakeRootFile,
-			wantErr: false,
+			wantErr: true,
 		},
 		{
 			name: "FAT16 folder",
@@ -967,7 +965,7 @@ func TestFs_Open(t *testing.T) {
 			name: "FAT16 file",
 			fs:   testingNew(t, testFileReader(fat16)),
 			args: args{
-				path: "/" + testFolderInImages + "/README.md",
+				path: testFolderInImages + "/README.md",
 			},
 			want:    &fakeFileFAT16,
 			wantErr: false,
