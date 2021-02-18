@@ -57,26 +57,53 @@ func (f *File) Close() error {
 }
 
 func (f *File) Read(p []byte) (n int, err error) {
-	data, err := f.fs.readFileAt(f.firstCluster, f.stat.Size(), f.offset, int64(len(p)))
-	if err != nil {
-		return len(data), checkpoint.Wrap(err, ErrReadFile)
+	if p == nil {
+		return 0, nil
 	}
 
-	copy(p, data)
+	// Reading a file if the size has been already reached, makes no sense.
+	if f.stat.Size() <= f.offset {
+		return 0, io.EOF
+	}
+
+	data, err := f.fs.readFileAt(f.firstCluster, f.stat.Size(), f.offset, int64(len(p)))
+
+	if data != nil {
+		copy(p, data)
+	}
+	f.Seek(int64(len(data)), io.SeekCurrent)
+
+	if err != nil {
+		return len(data), err
+	}
+
 	if len(data) < len(p) {
-		return len(data), checkpoint.Wrap(io.EOF, ErrReadFile)
+		return len(data), io.EOF
 	}
 	return len(data), nil
 }
 
 func (f *File) ReadAt(p []byte, off int64) (n int, err error) {
+	if p == nil {
+		return 0, nil
+	}
+
+	// Reading over the end makes no sense.
+	if f.stat.Size() <= off {
+		return 0, io.EOF
+	}
+
 	size := len(p)
 	data, err := f.fs.readFileAt(f.firstCluster, f.stat.Size(), off, int64(size))
+
+	if data != nil {
+		copy(p, data)
+	}
+
 	if err != nil {
 		return len(data), checkpoint.Wrap(err, ErrReadFile)
 	}
 
-	copy(p, data)
 	if len(data) < size {
 		return len(data), checkpoint.Wrap(err, ErrReadFile)
 	}
@@ -92,7 +119,7 @@ func (f *File) Seek(offset int64, whence int) (int64, error) {
 	case io.SeekCurrent:
 		offset = f.offset + offset
 	case io.SeekEnd:
-		offset = f.stat.Size() - offset
+		offset = f.stat.Size() + offset
 	default:
 		return 0, checkpoint.Wrap(ErrSeekFile, fmt.Errorf("%w, offset: %v, whence: %v", syscall.EINVAL, offset, whence))
 	}
@@ -126,7 +153,7 @@ func (f *File) Readdir(count int) ([]os.FileInfo, error) {
 
 	var content []ExtendedEntryHeader
 	var err error
-	if f.path == "/" {
+	if f.path == "" {
 		content, err = f.fs.readRoot()
 	} else {
 		content, err = f.fs.readDir(f.firstCluster)
@@ -136,18 +163,28 @@ func (f *File) Readdir(count int) ([]os.FileInfo, error) {
 		return nil, checkpoint.Wrap(err, ErrReadDir)
 	}
 
+	if count <= 0 {
+		count = len(content)
+	} else if int64(len(content)) < f.offset+int64(count) {
+		count = int(int64(len(content)) - f.offset - 1)
+		err = io.EOF
+	}
 	// TODO: Maybe support the count param directly in readDir to avoid reading too much.
 	//       (Not sure if that's easy and worth it)
 	if count > 0 {
-		content = content[:count]
+		content = content[f.offset:count]
+	} else if count < 0 {
+		content = content[0:0]
 	}
+
+	f.offset += int64(count)
 
 	result := make([]os.FileInfo, len(content))
 	for i := range content {
 		result[i] = content[i].FileInfo()
 	}
 
-	return result, nil
+	return result, err
 }
 
 func (f *File) Readdirnames(count int) ([]string, error) {

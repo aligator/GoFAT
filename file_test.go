@@ -368,7 +368,7 @@ func TestFile_Seek(t *testing.T) {
 				}},
 			},
 			args: args{
-				offset: 200,
+				offset: -200,
 				whence: io.SeekEnd,
 			},
 			want:    4800,
@@ -506,7 +506,7 @@ func TestFile_Readdir(t *testing.T) {
 		{
 			name: "Read root dir",
 			fields: fileTestFields{
-				path:        "/",
+				path:        "",
 				isDirectory: true,
 			},
 			args: args{
@@ -658,7 +658,7 @@ func TestFile_Readdirnames(t *testing.T) {
 		{
 			name: "Read root dir",
 			fields: fileTestFields{
-				path:        "/",
+				path:        "",
 				isDirectory: true,
 			},
 			args: args{

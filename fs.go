@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/aligator/gofat/checkpoint"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,6 +40,7 @@ const (
 
 // These errors may occur while processing a FAT filesystem.
 var (
+	ErrInvalidPath          = errors.New("invalid path")
 	ErrOpenFilesystem       = errors.New("could not open the filesystem")
 	ErrReadFilesystemFile   = errors.New("could not read file completely from the filesystem")
 	ErrReadFilesystemDir    = errors.New("could not a directory from the filesystem")
@@ -111,7 +113,7 @@ func NewSkipChecks(reader io.ReadSeeker) (*Fs, error) {
 // If readSize is <= 0 it returns the whole file.
 // If readSize is > fileSize it also just returns the whole file but also io.EOF as error.
 // If an error occurs all bytes read until then and the error is returned. io.EOF is ignored in that case.
-func (fs *Fs) readFileAt(cluster fatEntry, fileSize int64, offset int64, readSize int64) ([]byte, error) {
+func (f *Fs) readFileAt(cluster fatEntry, fileSize int64, offset int64, readSize int64) ([]byte, error) {
 	// finalize returns the data sliced to either the readSize, the fileSize or 'as it is'.
 	// It may return io.EOF if readSize + offset > fileSize.
 	// Use it before any return in readFileAt.
@@ -157,12 +159,12 @@ func (fs *Fs) readFileAt(cluster fatEntry, fileSize int64, offset int64, readSiz
 	// Find the cluster to start.
 	// We still have to load the cluster number chain.
 	for {
-		if int64(clusterNumber)*int64(fs.info.SectorsPerCluster)*int64(fs.info.BytesPerSector) <= offset &&
-			int64(clusterNumber+1)*int64(fs.info.SectorsPerCluster)*int64(fs.info.BytesPerSector) >= offset {
+		if int64(clusterNumber)*int64(f.info.SectorsPerCluster)*int64(f.info.BytesPerSector) <= offset &&
+			int64(clusterNumber+1)*int64(f.info.SectorsPerCluster)*int64(f.info.BytesPerSector) >= offset {
 			break
 		}
 
-		nextCluster, err := fs.getFatEntry(currentCluster)
+		nextCluster, err := f.getFatEntry(currentCluster)
 		if err != nil {
 			return finalize(data, err)
 		}
@@ -175,28 +177,28 @@ func (fs *Fs) readFileAt(cluster fatEntry, fileSize int64, offset int64, readSiz
 		clusterNumber++
 	}
 
-	offsetRest -= int64(clusterNumber) * int64(fs.info.SectorsPerCluster) * int64(fs.info.BytesPerSector)
+	offsetRest -= int64(clusterNumber) * int64(f.info.SectorsPerCluster) * int64(f.info.BytesPerSector)
 
 	skip := uint8(0)
 	// Calculate the sectors to skip for the first sector.
-	skip = uint8(offsetRest / int64(fs.info.BytesPerSector))
+	skip = uint8(offsetRest / int64(f.info.BytesPerSector))
 
 	// Calculate the offsetRest -> the amount of bytes to skip on the first read sector.
-	offsetRest -= int64(fs.info.BytesPerSector) * int64(skip)
+	offsetRest -= int64(f.info.BytesPerSector) * int64(skip)
 
 	// Read the clusters.
 	for {
-		firstSectorOfCluster := ((currentCluster.Value() - 2) * uint32(fs.info.SectorsPerCluster)) + fs.info.FirstDataSector
+		firstSectorOfCluster := ((currentCluster.Value() - 2) * uint32(f.info.SectorsPerCluster)) + f.info.FirstDataSector
 
 		// Read the sectors of the cluster
-		for i := skip; i < fs.info.SectorsPerCluster; i++ {
+		for i := skip; i < f.info.SectorsPerCluster; i++ {
 			skip = 0
-			sector, err := fs.fetch(firstSectorOfCluster + uint32(i))
+			sector, err := f.fetch(firstSectorOfCluster + uint32(i))
 			if err != nil {
 				return finalize(data, err)
 			}
 
-			newData := make([]byte, fs.info.BytesPerSector)
+			newData := make([]byte, f.info.BytesPerSector)
 			err = binary.Read(bytes.NewReader(sector.buffer), binary.LittleEndian, &newData)
 			if err != nil {
 				return finalize(nil, err)
@@ -212,11 +214,11 @@ func (fs *Fs) readFileAt(cluster fatEntry, fileSize int64, offset int64, readSiz
 		}
 
 		// Stop when the size needed is reached.
-		if readSize > int64(0) && int64(clusterNumber+1)*int64(fs.info.SectorsPerCluster)*int64(fs.info.BytesPerSector) >= offset+readSize {
+		if readSize > int64(0) && int64(clusterNumber+1)*int64(f.info.SectorsPerCluster)*int64(f.info.BytesPerSector) >= offset+readSize {
 			break
 		}
 
-		nextCluster, err := fs.getFatEntry(currentCluster)
+		nextCluster, err := f.getFatEntry(currentCluster)
 		if err != nil {
 			return finalize(data, err)
 		}
@@ -234,7 +236,7 @@ func (fs *Fs) readFileAt(cluster fatEntry, fileSize int64, offset int64, readSiz
 
 // parseDir reads and interprets a directory-file. It returns a slice of ExtendedEntryHeader,
 // one for each file in the directory. It may return an error if it cannot be parsed.
-func (fs *Fs) parseDir(data []byte) ([]ExtendedEntryHeader, error) {
+func (f *Fs) parseDir(data []byte) ([]ExtendedEntryHeader, error) {
 	entries := make([]EntryHeader, len(data)/32)
 
 	err := binary.Read(bytes.NewReader(data), binary.LittleEndian, &entries)
@@ -380,18 +382,18 @@ func (fs *Fs) parseDir(data []byte) ([]ExtendedEntryHeader, error) {
 	return directory, nil
 }
 
-func (fs *Fs) readDirAtSector(sectorNum uint32) ([]ExtendedEntryHeader, error) {
-	rootDirSectorsCount := uint32(((fs.info.RootEntryCount * 32) + (fs.info.BytesPerSector - 1)) / fs.info.BytesPerSector)
+func (f *Fs) readDirAtSector(sectorNum uint32) ([]ExtendedEntryHeader, error) {
+	rootDirSectorsCount := uint32(((f.info.RootEntryCount * 32) + (f.info.BytesPerSector - 1)) / f.info.BytesPerSector)
 
 	data := make([]byte, 0)
 
 	for i := uint32(0); i < rootDirSectorsCount; i++ {
-		sector, err := fs.fetch(sectorNum + i)
+		sector, err := f.fetch(sectorNum + i)
 		if err != nil {
 			return nil, checkpoint.Wrap(err, ErrReadFilesystemDir)
 		}
 
-		newData := make([]byte, fs.info.BytesPerSector)
+		newData := make([]byte, f.info.BytesPerSector)
 		err = binary.Read(bytes.NewReader(sector.buffer), binary.LittleEndian, &newData)
 		if err != nil {
 			return nil, checkpoint.Wrap(err, ErrReadFilesystemDir)
@@ -400,33 +402,33 @@ func (fs *Fs) readDirAtSector(sectorNum uint32) ([]ExtendedEntryHeader, error) {
 		data = append(data, newData...)
 	}
 
-	return fs.parseDir(data)
+	return f.parseDir(data)
 }
 
-func (fs *Fs) readDir(cluster fatEntry) ([]ExtendedEntryHeader, error) {
-	data, err := fs.readFileAt(cluster, -1, 0, 0)
+func (f *Fs) readDir(cluster fatEntry) ([]ExtendedEntryHeader, error) {
+	data, err := f.readFileAt(cluster, -1, 0, 0)
 	if err != nil {
 		return nil, checkpoint.Wrap(err, ErrReadFilesystemDir)
 	}
 
-	return fs.parseDir(data)
+	return f.parseDir(data)
 }
 
 // readRoot either reads the root directory either from the specific root sector if the type is < FAT32 or
 // from the first root cluster if the type is FAT32.
-func (fs *Fs) readRoot() ([]ExtendedEntryHeader, error) {
-	if fs.info.FSType == FAT12 {
+func (f *Fs) readRoot() ([]ExtendedEntryHeader, error) {
+	if f.info.FSType == FAT12 {
 		checkpoint.From(ErrNotSupported)
 	}
 
 	var root []ExtendedEntryHeader
 	var err error
-	switch fs.info.FSType {
+	switch f.info.FSType {
 	case FAT16:
-		firstRootSector := uint32(fs.info.ReservedSectorCount) + (uint32(fs.info.FatCount) * fs.info.FatSize)
-		root, err = fs.readDirAtSector(firstRootSector)
+		firstRootSector := uint32(f.info.ReservedSectorCount) + (uint32(f.info.FatCount) * f.info.FatSize)
+		root, err = f.readDirAtSector(firstRootSector)
 	case FAT32:
-		root, err = fs.readDir(fs.info.fat32Specific.RootCluster)
+		root, err = f.readDir(f.info.fat32Specific.RootCluster)
 	}
 
 	return root, checkpoint.Wrap(err, ErrReadFilesystemDir)
@@ -435,8 +437,8 @@ func (fs *Fs) readRoot() ([]ExtendedEntryHeader, error) {
 // initialize a FAT filesystem. Some checks are done to validate if it is a valid FAT filesystem.
 // (If skipping checks is disabled.)
 // It also calculates the filesystem type.
-func (fs *Fs) initialize(skipChecks bool) error {
-	_, err := fs.reader.Seek(0, io.SeekStart)
+func (f *Fs) initialize(skipChecks bool) error {
+	_, err := f.reader.Seek(0, io.SeekStart)
 	if err != nil {
 		return err
 	}
@@ -444,12 +446,12 @@ func (fs *Fs) initialize(skipChecks bool) error {
 	// The data for the first sector is always in the first 512 so use that until the correct sector size is loaded.
 	// Note that almost all FAT filesystems use 512.
 	// Some may use 1024, 2048 or 4096 but this is not supported by many drivers.
-	fs.info.BytesPerSector = 512
+	f.info.BytesPerSector = 512
 
 	// Read sec0
 	// Set to a sector unequal 0 to avoid using empty buffer in fetch.
-	fs.sectorCache.current = 0xFFFFFFFF
-	sector, err := fs.fetch(0)
+	f.sectorCache.current = 0xFFFFFFFF
+	sector, err := f.fetch(0)
 	if err != nil {
 		return err
 	}
@@ -506,14 +508,14 @@ func (fs *Fs) initialize(skipChecks bool) error {
 	var rootDirSectors uint32 = ((uint32(bpb.RootEntryCount) * 32) + (uint32(bpb.BytesPerSector) - 1)) / uint32(bpb.BytesPerSector)
 
 	if bpb.FATSize16 != 0 {
-		fs.info.FatSize = uint32(bpb.FATSize16)
+		f.info.FatSize = uint32(bpb.FATSize16)
 	} else {
 		// Read the FAT32 specific data.
-		err = binary.Read(bytes.NewReader(bpb.FATSpecificData[:]), binary.LittleEndian, &fs.info.fat32Specific)
+		err = binary.Read(bytes.NewReader(bpb.FATSpecificData[:]), binary.LittleEndian, &f.info.fat32Specific)
 		if err != nil {
 			return checkpoint.Wrap(err, fmt.Errorf("%w: parsing the fat32 specific data failed", ErrInitializeFilesystem))
 		}
-		fs.info.FatSize = fs.info.fat32Specific.FatSize
+		f.info.FatSize = f.info.fat32Specific.FatSize
 	}
 
 	if bpb.TotalSectors16 != 0 {
@@ -530,71 +532,71 @@ func (fs *Fs) initialize(skipChecks bool) error {
 		// For now do not support FAT12 as its a bit more complicated.
 		return checkpoint.From(fmt.Errorf("%w: FAT12 is not supported", ErrNotSupported))
 	} else if countOfClusters < 65525 {
-		fs.info.FSType = FAT16
+		f.info.FSType = FAT16
 	} else {
-		fs.info.FSType = FAT32
+		f.info.FSType = FAT32
 	}
 
 	// The root entry count has to be 0 for FAT32 and has to fit exactly into the sectors.
-	if fs.info.FSType == FAT32 && bpb.RootEntryCount != 0 || (fs.info.FSType != FAT32 && (bpb.RootEntryCount*32)%bpb.BytesPerSector != 0) {
+	if f.info.FSType == FAT32 && bpb.RootEntryCount != 0 || (f.info.FSType != FAT32 && (bpb.RootEntryCount*32)%bpb.BytesPerSector != 0) {
 		return checkpoint.From(fmt.Errorf("%w: invalid root entry count", ErrInitializeFilesystem))
 	}
 
 	// Now all needed data can be saved. See FAT spec for details.
-	fs.info.BytesPerSector = bpb.BytesPerSector
+	f.info.BytesPerSector = bpb.BytesPerSector
 	if bpb.TotalSectors16 != 0 {
-		fs.info.TotalSectorCount = uint32(bpb.TotalSectors16)
+		f.info.TotalSectorCount = uint32(bpb.TotalSectors16)
 	} else {
-		fs.info.TotalSectorCount = bpb.TotalSectors32
+		f.info.TotalSectorCount = bpb.TotalSectors32
 	}
-	dataSectors = fs.info.TotalSectorCount - (uint32(bpb.ReservedSectorCount) + (uint32(bpb.NumFATs) * fs.info.FatSize) + rootDirSectors)
-	fs.info.SectorsPerCluster = bpb.SectorsPerCluster
-	fs.info.ReservedSectorCount = bpb.ReservedSectorCount
-	fs.info.FirstDataSector = uint32(bpb.ReservedSectorCount) + (uint32(bpb.NumFATs) * fs.info.FatSize) + rootDirSectors
-	fs.info.FatCount = bpb.NumFATs
-	fs.info.RootEntryCount = bpb.RootEntryCount
+	dataSectors = f.info.TotalSectorCount - (uint32(bpb.ReservedSectorCount) + (uint32(bpb.NumFATs) * f.info.FatSize) + rootDirSectors)
+	f.info.SectorsPerCluster = bpb.SectorsPerCluster
+	f.info.ReservedSectorCount = bpb.ReservedSectorCount
+	f.info.FirstDataSector = uint32(bpb.ReservedSectorCount) + (uint32(bpb.NumFATs) * f.info.FatSize) + rootDirSectors
+	f.info.FatCount = bpb.NumFATs
+	f.info.RootEntryCount = bpb.RootEntryCount
 
-	if fs.info.FSType == FAT32 {
-		fs.info.Label = string(fs.info.fat32Specific.BSVolumeLabel[:])
+	if f.info.FSType == FAT32 {
+		f.info.Label = string(f.info.fat32Specific.BSVolumeLabel[:])
 	} else {
-		err = binary.Read(bytes.NewReader(bpb.FATSpecificData[:]), binary.LittleEndian, &fs.info.fat16Specific)
+		err = binary.Read(bytes.NewReader(bpb.FATSpecificData[:]), binary.LittleEndian, &f.info.fat16Specific)
 		if err != nil {
 			return checkpoint.Wrap(err, fmt.Errorf("%w: parsing the fat16 specific data failed", ErrInitializeFilesystem))
 		}
 
-		fs.info.Label = string(fs.info.fat16Specific.BSVolumeLabel[:])
+		f.info.Label = string(f.info.fat16Specific.BSVolumeLabel[:])
 	}
 
 	return nil
 }
 
 // fetch loads a specific single sector of the filesystem.
-func (fs *Fs) fetch(sectorNum uint32) (Sector, error) {
-	fs.lock.Lock()
-	defer fs.lock.Unlock()
+func (f *Fs) fetch(sectorNum uint32) (Sector, error) {
+	f.lock.Lock()
+	defer f.lock.Unlock()
 
 	sector := Sector{
-		buffer: make([]byte, fs.info.BytesPerSector),
+		buffer: make([]byte, f.info.BytesPerSector),
 	}
 
 	// Only load it once.
-	if sectorNum == fs.sectorCache.current {
-		return fs.sectorCache, nil
+	if sectorNum == f.sectorCache.current {
+		return f.sectorCache, nil
 	}
 
 	// Seek to and Read the new sectorNum.
-	_, err := fs.reader.Seek(int64(sectorNum)*int64(fs.info.BytesPerSector), io.SeekStart)
+	_, err := f.reader.Seek(int64(sectorNum)*int64(f.info.BytesPerSector), io.SeekStart)
 	if err != nil {
 		return Sector{}, checkpoint.Wrap(err, fmt.Errorf("%w: sector %d", ErrFetchingSector, sectorNum))
 	}
 
-	_, err = fs.reader.Read(sector.buffer)
+	_, err = f.reader.Read(sector.buffer)
 	if err != nil {
 		return Sector{}, checkpoint.Wrap(err, fmt.Errorf("%w: sector %d", ErrFetchingSector, sectorNum))
 	}
 
 	sector.current = sectorNum
-	fs.sectorCache = sector
+	f.sectorCache = sector
 	return sector, nil
 }
 
@@ -672,28 +674,28 @@ func (e fatEntry) ReadAsEOF() bool {
 }
 
 // getFatEntry returns the next fat entry for the given cluster.
-func (fs *Fs) getFatEntry(cluster fatEntry) (fatEntry, error) {
-	if fs.info.FSType == FAT12 {
+func (f *Fs) getFatEntry(cluster fatEntry) (fatEntry, error) {
+	if f.info.FSType == FAT12 {
 		return 0, checkpoint.From(ErrNotSupported)
 	}
 
 	var fatOffset uint32
-	switch fs.info.FSType {
+	switch f.info.FSType {
 	case FAT16:
 		fatOffset = cluster.Value() * 2
 	case FAT32:
 		fatOffset = cluster.Value() * 4
 	}
 
-	fatSectorNumber := uint32(fs.info.ReservedSectorCount) + (fatOffset / uint32(fs.info.BytesPerSector))
-	fatEntryOffset := fatOffset % uint32(fs.info.BytesPerSector)
+	fatSectorNumber := uint32(f.info.ReservedSectorCount) + (fatOffset / uint32(f.info.BytesPerSector))
+	fatEntryOffset := fatOffset % uint32(f.info.BytesPerSector)
 
-	sector, err := fs.fetch(fatSectorNumber)
+	sector, err := f.fetch(fatSectorNumber)
 	if err != nil {
 		return 0, checkpoint.Wrap(err, ErrReadFat)
 	}
 
-	switch fs.info.FSType {
+	switch f.info.FSType {
 	case FAT16:
 		fat16ClusterEntryValue := binary.LittleEndian.Uint16(sector.buffer[fatEntryOffset : fatEntryOffset+2])
 
@@ -711,40 +713,43 @@ func (fs *Fs) getFatEntry(cluster fatEntry) (fatEntry, error) {
 	return 0, checkpoint.From(ErrNotSupported)
 }
 
-func (fs *Fs) store() error {
+func (f *Fs) store() error {
 	panic("implement me")
 }
 
-func (fs *Fs) Label() string {
+func (f *Fs) Label() string {
 	// TODO: There may be a label entry in the root folder. Check how that should be handled.
-	return strings.TrimRight(fs.info.Label, " ")
+	return strings.TrimRight(f.info.Label, " ")
 }
 
-func (fs *Fs) FSType() FATType {
-	return fs.info.FSType
+func (f *Fs) FSType() FATType {
+	return f.info.FSType
 }
 
-func (fs *Fs) Create(name string) (afero.File, error) {
+func (f *Fs) Create(name string) (afero.File, error) {
 	panic("implement me")
 }
 
-func (fs *Fs) Mkdir(name string, perm os.FileMode) error {
+func (f *Fs) Mkdir(name string, perm os.FileMode) error {
 	panic("implement me")
 }
 
-func (fs *Fs) MkdirAll(path string, perm os.FileMode) error {
+func (f *Fs) MkdirAll(path string, perm os.FileMode) error {
 	panic("implement me")
 }
 
-func (fs *Fs) Open(path string) (afero.File, error) {
+func (f *Fs) Open(path string) (afero.File, error) {
+	if !fs.ValidPath(path) {
+		return nil, checkpoint.Wrap(ErrInvalidPath, ErrOpenFilesystem)
+	}
 	path = filepath.ToSlash(path)
 
-	if path == "" {
-		path = "/"
+	if path == "." {
+		path = ""
 	}
 
 	// For root just return a fake-file.
-	if path == "/" {
+	if path == "" {
 		fakeEntry := ExtendedEntryHeader{
 			EntryHeader: EntryHeader{
 				Name:      [11]byte{' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' '},
@@ -753,7 +758,7 @@ func (fs *Fs) Open(path string) (afero.File, error) {
 		}
 
 		return &File{
-			fs:          fs,
+			fs:          f,
 			path:        path,
 			isDirectory: true,
 			stat:        fakeEntry.FileInfo(),
@@ -764,7 +769,7 @@ func (fs *Fs) Open(path string) (afero.File, error) {
 	path = strings.TrimSuffix(path, "/")
 	dirParts := strings.Split(path, "/")
 
-	content, err := fs.readRoot()
+	content, err := f.readRoot()
 	if err != nil {
 		return nil, checkpoint.Wrap(err, ErrOpenFilesystem)
 	}
@@ -783,7 +788,7 @@ pathLoop:
 				// If it is the last one return it as a File.
 				if i == len(dirParts)-1 {
 					return &File{
-						fs:           fs,
+						fs:           f,
 						path:         path,
 						isDirectory:  fileInfo.IsDir(),
 						isReadOnly:   entry.Attribute&AttrReadOnly == AttrReadOnly,
@@ -799,7 +804,7 @@ pathLoop:
 					return nil, checkpoint.Wrap(syscall.ENOTDIR, ErrOpenFilesystem)
 				}
 
-				content, err = fs.readDir(fatEntry(uint32(entry.FirstClusterHI)<<16 | uint32(entry.FirstClusterLO)))
+				content, err = f.readDir(fatEntry(uint32(entry.FirstClusterHI)<<16 | uint32(entry.FirstClusterLO)))
 				if err != nil {
 					return nil, checkpoint.Wrap(err, ErrOpenFilesystem)
 				}
@@ -813,25 +818,25 @@ pathLoop:
 	return nil, checkpoint.Wrap(ErrOpenFilesystem, errors.New("path doesn't exist: "+path))
 }
 
-func (fs *Fs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+func (f *Fs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
 	// TODO: implement flag and perm
-	return fs.Open(name)
+	return f.Open(name)
 }
 
-func (fs *Fs) Remove(name string) error {
+func (f *Fs) Remove(name string) error {
 	panic("implement me")
 }
 
-func (fs *Fs) RemoveAll(path string) error {
+func (f *Fs) RemoveAll(path string) error {
 	panic("implement me")
 }
 
-func (fs *Fs) Rename(oldname, newname string) error {
+func (f *Fs) Rename(oldname, newname string) error {
 	panic("implement me")
 }
 
-func (fs *Fs) Stat(path string) (os.FileInfo, error) {
-	file, err := fs.Open(path)
+func (f *Fs) Stat(path string) (os.FileInfo, error) {
+	file, err := f.Open(path)
 	if err != nil {
 		return nil, checkpoint.From(errors.New("path doesn't exist: " + path))
 	}
@@ -840,18 +845,18 @@ func (fs *Fs) Stat(path string) (os.FileInfo, error) {
 	return file.Stat()
 }
 
-func (fs *Fs) Name() string {
+func (f *Fs) Name() string {
 	return "FAT"
 }
 
-func (fs *Fs) Chmod(name string, mode os.FileMode) error {
+func (f *Fs) Chmod(name string, mode os.FileMode) error {
 	panic("implement me")
 }
 
-func (fs *Fs) Chown(name string, uid, gid int) error {
+func (f *Fs) Chown(name string, uid, gid int) error {
 	panic("implement me")
 }
 
-func (fs *Fs) Chtimes(name string, atime time.Time, mtime time.Time) error {
+func (f *Fs) Chtimes(name string, atime time.Time, mtime time.Time) error {
 	panic("implement me")
 }
