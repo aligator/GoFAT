@@ -54,7 +54,11 @@ type GoFs struct {
 // NewGoFS opens a FAT filesystem from the given reader as fs.FS compatible filesystem.
 func NewGoFS(reader io.ReadSeeker) (*GoFs, error) {
 	fs, err := New(reader)
-	return &GoFs{*fs}, err
+	if err != nil {
+		return nil, err
+	}
+
+	return &GoFs{*fs}, nil
 }
 
 // NewGoFSSkipChecks opens a FAT filesystem from the given reader as fs.FS compatible filesystem just like NewGoFs but
@@ -62,7 +66,11 @@ func NewGoFS(reader io.ReadSeeker) (*GoFs, error) {
 // Use with caution!
 func NewGoFSSkipChecks(reader io.ReadSeeker) (*GoFs, error) {
 	fs, err := NewSkipChecks(reader)
-	return &GoFs{*fs}, err
+	if err != nil {
+		return nil, err
+	}
+
+	return &GoFs{*fs}, nil
 }
 
 func (g GoFs) Open(name string) (fs.File, error) {
