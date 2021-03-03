@@ -52,17 +52,17 @@ That's it!
 
 ## Compatibility with Go 1.16
 
-As the Go 1.16 fs.FS interface is not fully compatible with the afero.Fs interface. But I
-added a simple wrapper around it.  
+As the Go 1.16 fs.FS interface is not fully compatible with the afero.Fs interface, it cannot be used with that directly.
+But I added a simple wrapper around it.  
 You can either just wrap an existing fat fs: 
 ```go
 gofs := GoFs{*fs}
 ```
 
 Or directly create a new one using `NewGoFS(...)` or `NewGoFSSkipChecks(...)`.  
-Note that this wrapper has a small overhead, especially ReadDir because the result has to be converted to []fs.DirEntry.
+Note that this wrapper has a small overhead, especially ReadDir because the result has to be converted to `[]fs.DirEntry`.
 
-I also added testing.fstest to the unit tests.
+I also added `testing.fstest` to the unit tests.
 
 ## Test images
 
