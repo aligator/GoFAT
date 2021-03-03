@@ -128,7 +128,7 @@ func (f *Fs) readFileAt(cluster fatEntry, fileSize int64, offset int64, readSize
 		}
 
 		// The file was not as long as it should be.
-		if err == nil && int64(len(result)) < fileSize-offset {
+		if err == nil && int64(len(result)) < fileSize-offset && int64(len(result)) < readSize {
 			err = io.ErrUnexpectedEOF
 		}
 
@@ -152,10 +152,6 @@ func (f *Fs) readFileAt(cluster fatEntry, fileSize int64, offset int64, readSize
 	clusterNumber := 0
 	currentCluster := cluster
 
-	// offsetRest contains the offset which is needed for the actual first sector.
-	// for more easy calculation. This value gets updated everytime some bytes get skipped.
-	offsetRest := offset
-
 	// Find the cluster to start.
 	// We still have to load the cluster number chain.
 	for {
@@ -177,22 +173,23 @@ func (f *Fs) readFileAt(cluster fatEntry, fileSize int64, offset int64, readSize
 		clusterNumber++
 	}
 
-	offsetRest -= int64(clusterNumber) * int64(f.info.SectorsPerCluster) * int64(f.info.BytesPerSector)
+	// offsetRest contains the offset which is needed for the actual first sector.
+	// First the clusters which we already ignored get removed from the offset to initialize the offsetRest.
+	offsetRest := offset - (int64(clusterNumber) * int64(f.info.SectorsPerCluster) * int64(f.info.BytesPerSector))
 
-	skip := uint8(0)
 	// Calculate the sectors to skip for the first sector.
-	skip = uint8(offsetRest / int64(f.info.BytesPerSector))
+	skip := uint8(offsetRest / int64(f.info.BytesPerSector))
 
-	// Calculate the offsetRest -> the amount of bytes to skip on the first read sector.
+	// Calculate the final offsetRest by removing these skipped sectors also from the offsetRest.
+	// The result is the value we have to ignore when reading the first sector.
 	offsetRest -= int64(f.info.BytesPerSector) * int64(skip)
 
 	// Read the clusters.
 	for {
 		firstSectorOfCluster := ((currentCluster.Value() - 2) * uint32(f.info.SectorsPerCluster)) + f.info.FirstDataSector
 
-		// Read the sectors of the cluster
+		// Read the sectors of the cluster, skip the first ones if needed
 		for i := skip; i < f.info.SectorsPerCluster; i++ {
-			skip = 0
 			sector, err := f.fetch(firstSectorOfCluster + uint32(i))
 			if err != nil {
 				return finalize(data, err)
@@ -204,7 +201,7 @@ func (f *Fs) readFileAt(cluster fatEntry, fileSize int64, offset int64, readSize
 				return finalize(nil, err)
 			}
 
-			// Trim the first bytes based on the offset if it is the first read.
+			// Trim the first bytes based on the offsetRest if it is the first read.
 			if len(data) == 0 {
 				data = append(data, newData[offsetRest:]...)
 				continue
@@ -212,6 +209,8 @@ func (f *Fs) readFileAt(cluster fatEntry, fileSize int64, offset int64, readSize
 
 			data = append(data, newData...)
 		}
+
+		skip = 0
 
 		// Stop when the size needed is reached.
 		if readSize > int64(0) && int64(clusterNumber+1)*int64(f.info.SectorsPerCluster)*int64(f.info.BytesPerSector) >= offset+readSize {
@@ -224,6 +223,10 @@ func (f *Fs) readFileAt(cluster fatEntry, fileSize int64, offset int64, readSize
 		}
 
 		if !nextCluster.ReadAsNextCluster() {
+			// The file was not as long as it should be.
+			if err == nil && int64(len(data)) < fileSize-offset {
+				return finalize(data, io.ErrUnexpectedEOF)
+			}
 			break
 		}
 
@@ -840,7 +843,9 @@ func (f *Fs) Stat(path string) (os.FileInfo, error) {
 	if err != nil {
 		return nil, checkpoint.From(errors.New("path doesn't exist: " + path))
 	}
-	defer file.Close()
+	defer func() {
+		_ = file.Close()
+	}()
 
 	return file.Stat()
 }

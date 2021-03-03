@@ -510,7 +510,7 @@ func TestFile_Readdir(t *testing.T) {
 				isDirectory: true,
 			},
 			args: args{
-				count: 0,
+				count: -1,
 			},
 			mockData: mock{
 				readRootResult: []ExtendedEntryHeader{
@@ -535,7 +535,7 @@ func TestFile_Readdir(t *testing.T) {
 				isDirectory: true,
 			},
 			args: args{
-				count: 0,
+				count: -1,
 			},
 			mockData: mock{
 				readDirResult: []ExtendedEntryHeader{
@@ -584,7 +584,7 @@ func TestFile_Readdir(t *testing.T) {
 				isDirectory: false,
 			},
 			args: args{
-				count: 0,
+				count: -1,
 			},
 			mockData: mock{},
 			want:     nil,
@@ -662,7 +662,7 @@ func TestFile_Readdirnames(t *testing.T) {
 				isDirectory: true,
 			},
 			args: args{
-				count: 0,
+				count: -1,
 			},
 			mockData: mock{
 				readRootResult: []ExtendedEntryHeader{
@@ -683,7 +683,7 @@ func TestFile_Readdirnames(t *testing.T) {
 				isDirectory: true,
 			},
 			args: args{
-				count: 0,
+				count: -1,
 			},
 			mockData: mock{
 				readDirResult: []ExtendedEntryHeader{
