@@ -50,6 +50,20 @@ func main() {
 
 That's it!
 
+## Compatibility with Go 1.16
+
+As the Go 1.16 fs.FS interface is not fully compatible with the afero.Fs interface. But I
+added a simple wrapper around it.  
+You can either just wrap an existing fat fs: 
+```go
+gofs := GoFs{*fs}
+```
+
+Or directly create a new one using `NewGoFS(...)` or `NewGoFSSkipChecks(...)`.  
+Note that this wrapper has a small overhead, especially ReadDir because the result has to be converted to []fs.DirEntry.
+
+I also added testing.fstest to the unit tests.
+
 ## Test images
 
 To get access to some test-images which already contain a FAT filesystem just run
@@ -70,7 +84,6 @@ You may use github.com/cweill/gotests to generate your test boilerplate code.
 Some resources on how FAT works are:
 
 * https://en.wikipedia.org/wiki/Design_of_the_FAT_file_system
-* https://docs.microsoft.com/en-us/windows/win32/fileio/exfat-specification
 * https://wiki.osdev.org/FAT
 * https://github.com/ryansturmer/thinfat32
 * https://github.com/ryansturmer/thinfat32/blob/master/fatgen103.pdf
