@@ -37,16 +37,13 @@ func (g GoFile) Close() error {
 
 func (g GoFile) ReadDir(n int) ([]fs.DirEntry, error) {
 	entries, err := g.File.Readdir(n)
-	if err != nil {
-		return nil, err
-	}
 
 	goEntries := make([]fs.DirEntry, len(entries))
 	for i, e := range entries {
 		goEntries[i] = GoDirEntry{e}
 	}
 
-	return goEntries, nil
+	return goEntries, err
 }
 
 // GoFs just wraps the afero FAT implementation to be compatible with fs.FS.

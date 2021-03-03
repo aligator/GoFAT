@@ -66,20 +66,24 @@ func (f *File) Read(p []byte) (n int, err error) {
 		return 0, io.EOF
 	}
 
-	data, err := f.fs.readFileAt(f.firstCluster, f.stat.Size(), f.offset, int64(len(p)))
+	offset := f.offset
+	data, err := f.fs.readFileAt(f.firstCluster, f.stat.Size(), offset, int64(len(p)))
 
 	if data != nil {
 		copy(p, data)
 	}
-	f.Seek(int64(len(data)), io.SeekCurrent)
+
+	// Seek even if an error occurred, errors from reading are used even if seek also errors.
+	_, seekErr := f.Seek(int64(len(data)), io.SeekCurrent)
 
 	if err != nil {
-		return len(data), err
+		return len(data), checkpoint.Wrap(err, ErrReadFile)
 	}
 
-	if len(data) < len(p) {
-		return len(data), io.EOF
+	if seekErr != nil {
+		return len(data), checkpoint.Wrap(seekErr, ErrReadFile)
 	}
+
 	return len(data), nil
 }
 
@@ -163,21 +167,26 @@ func (f *File) Readdir(count int) ([]os.FileInfo, error) {
 		return nil, checkpoint.Wrap(err, ErrReadDir)
 	}
 
-	if count <= 0 {
-		count = len(content)
-	} else if int64(len(content)) < f.offset+int64(count) {
-		count = int(int64(len(content)) - f.offset - 1)
+	end := len(content)
+
+	if int64(len(content)) < f.offset+int64(count) {
+		count = len(content) - int(f.offset)
 		err = io.EOF
 	}
-	// TODO: Maybe support the count param directly in readDir to avoid reading too much.
-	//       (Not sure if that's easy and worth it)
-	if count > 0 {
-		content = content[f.offset:count]
-	} else if count < 0 {
-		content = content[0:0]
+
+	if count >= 0 {
+		end = int(f.offset) + count
 	}
 
-	f.offset += int64(count)
+	// TODO: Maybe support the count param directly in readDir to avoid reading too much.
+	//       (Not sure if that's easy and worth it)
+	content = content[f.offset:end]
+
+	if count > 0 {
+		f.offset += int64(count)
+	} else if count < 0 {
+		f.offset = int64(end)
+	}
 
 	result := make([]os.FileInfo, len(content))
 	for i := range content {

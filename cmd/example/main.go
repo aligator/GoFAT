@@ -5,7 +5,6 @@ import (
 	"github.com/aligator/gofat"
 	"github.com/spf13/afero"
 	"io"
-	"io/ioutil"
 	"os"
 )
 
@@ -30,12 +29,6 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-
-	f, err := fat.Open("go/main.go")
-	fmt.Println(err)
-	bytes, err := ioutil.ReadAll(f)
-	fmt.Println(bytes, err)
-	//panic("")
 
 	fmt.Printf("Opened volume '%v' with type %v\n\n", fat.Label(), fat.FSType())
 
