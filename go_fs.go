@@ -2,6 +2,7 @@ package gofat
 
 import (
 	"errors"
+	"github.com/spf13/afero"
 	"io"
 	"io/fs"
 )
@@ -51,7 +52,31 @@ type GoFs struct {
 	Fs
 }
 
+// NewIOFS opens a FAT filesystem from the given reader as fs.FS compatible filesystem.
+func NewIOFS(reader io.ReadSeeker) (afero.IOFS, error) {
+	fs, err := New(reader)
+	if err != nil {
+		return afero.IOFS{}, err
+	}
+
+	return afero.NewIOFS(fs), nil
+}
+
+// NewIOFSSkipChecks opens a FAT filesystem from the given reader as fs.FS compatible filesystem just like NewGoFs but
+// it skips some filesystem validations which may allow you to open not perfectly standard FAT filesystems.
+// Use with caution!
+func NewIOFSSkipChecks(reader io.ReadSeeker) (afero.IOFS, error) {
+	fs, err := NewSkipChecks(reader)
+	if err != nil {
+		return afero.IOFS{}, err
+	}
+
+	return afero.NewIOFS(fs), nil
+}
+
 // NewGoFS opens a FAT filesystem from the given reader as fs.FS compatible filesystem.
+//
+// Deprecated: use NewIOFS as it uses the afero NewIOFS.
 func NewGoFS(reader io.ReadSeeker) (*GoFs, error) {
 	fs, err := New(reader)
 	if err != nil {
@@ -64,6 +89,8 @@ func NewGoFS(reader io.ReadSeeker) (*GoFs, error) {
 // NewGoFSSkipChecks opens a FAT filesystem from the given reader as fs.FS compatible filesystem just like NewGoFs but
 // it skips some filesystem validations which may allow you to open not perfectly standard FAT filesystems.
 // Use with caution!
+//
+// Deprecated: use NewIOFSSkipChecks as it uses the afero NewIOFS.
 func NewGoFSSkipChecks(reader io.ReadSeeker) (*GoFs, error) {
 	fs, err := NewSkipChecks(reader)
 	if err != nil {
